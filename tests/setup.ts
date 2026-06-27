@@ -1,0 +1,17 @@
+import '@testing-library/jest-dom/vitest';
+import 'fake-indexeddb/auto';
+import { webcrypto } from 'node:crypto';
+
+if (!globalThis.crypto?.subtle) {
+  Object.defineProperty(globalThis, 'crypto', {
+    value: webcrypto,
+    configurable: true
+  });
+}
+
+if (typeof window !== 'undefined' && !window.crypto?.subtle) {
+  Object.defineProperty(window, 'crypto', {
+    value: webcrypto,
+    configurable: true
+  });
+}

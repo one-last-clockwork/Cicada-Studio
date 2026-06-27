@@ -1,3 +1,14 @@
+# Goal Guidance
+docs/goal-guidance/
+
+# AI Agents
+.claude/
+.codex/
+
+# Dev Container
+.devcontainer/
+dc-exec.sh
+
 # Logs
 logs
 *.log
@@ -21,6 +32,8 @@ lib-cov
 # Coverage directory used by tools like istanbul
 coverage
 *.lcov
+playwright-report/
+test-results/
 
 # nyc test coverage
 .nyc_output
