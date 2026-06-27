@@ -1,6 +1,8 @@
-export type StudioTab = 'dashboard' | 'pages' | 'editor' | 'assets' | 'themes' | 'flowchart' | 'search' | 'conditions' | 'export';
+export type StudioTab = 'intro' | 'projects' | 'dashboard' | 'pages' | 'editor' | 'assets' | 'themes' | 'flowchart' | 'search' | 'conditions' | 'export';
 
 export const studioTabs: Array<{ id: StudioTab; label: string }> = [
+  { id: 'intro', label: 'System Guide' },
+  { id: 'projects', label: 'Projects' },
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'pages', label: 'Pages' },
   { id: 'editor', label: 'Editor' },

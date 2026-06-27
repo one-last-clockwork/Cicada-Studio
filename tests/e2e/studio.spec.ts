@@ -1,12 +1,43 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+async function answerConfirmation(page: Page, expectedText: string | RegExp, buttonName: string | RegExp): Promise<void> {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText(expectedText);
+  await dialog.getByRole('button', { name: buttonName }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
+async function isBeforeUnloadBlocked(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    return !window.dispatchEvent(event);
+  });
+}
 
 test('local-first studio edits a page and keeps preview sandboxed', async ({ page }) => {
   await page.goto('/');
+  await expect(page.locator('.topbar')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /Cicada Studio は/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'システム紹介' })).toHaveClass(/active/);
+  await expect(page.getByRole('button', { name: 'プロジェクト管理', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'プロジェクト管理' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'GitHubでソースコードを見る' })).toHaveAttribute(
+    'href',
+    'https://github.com/one-last-clockwork/Cicada-Studio'
+  );
+  await page.getByRole('button', { name: 'プロジェクト管理', exact: true }).click();
+  await expect(page.locator('.topbar')).toHaveCount(0);
   await expect(page.getByLabel('表示言語')).toHaveValue('ja');
-  await expect(page.getByRole('button', { name: '新規プロジェクト' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'プロジェクト管理' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'プロジェクト一覧' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'プロジェクトを削除' })).toBeVisible();
   await page.getByLabel('表示言語').selectOption('en');
+  await expect(page.getByRole('heading', { name: 'Project management' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Project list' })).toBeVisible();
   await page.getByRole('button', { name: /new project/i }).click();
+  await expect(page.locator('.topbar')).toHaveCount(0);
   await expect(page.getByLabel('Project name')).toHaveValue(/ARG Project/);
+  await expect(page.locator('.project-list-row.active')).toContainText('Active');
   await expect(page.getByRole('button', { name: 'Editor' })).toBeVisible();
   await page.getByRole('button', { name: 'Editor' }).click();
   await page.getByLabel('HTML compatible page body').fill('<main><h1>Playwright Clue</h1><script>window.parent.hacked=true</script></main>');
@@ -22,6 +53,139 @@ test('local-first studio edits a page and keeps preview sandboxed', async ({ pag
   await expect(page.getByRole('heading', { name: 'Reveal Blocks' })).toBeVisible();
   await page.getByRole('button', { name: 'Export' }).click();
   await expect(page.getByText('Public Static Site')).toBeVisible();
+});
+
+test('system guide manages project selection and deletion', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'プロジェクト管理', exact: true }).click();
+  await page.getByLabel('プロジェクト名').fill('保持するプロジェクト');
+  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '新規プロジェクト' }).click();
+  await expect(page.getByLabel('プロジェクト名')).toHaveValue('ARGプロジェクト 2');
+  await expect(page.locator('.project-list-row')).toHaveCount(2);
+  await expect(page.locator('.project-list-row.active')).toContainText('ARGプロジェクト 2');
+
+  await page.getByRole('button', { name: /保持するプロジェクト/ }).click();
+  await expect(page.getByLabel('プロジェクト名')).toHaveValue('保持するプロジェクト');
+  await page.getByRole('button', { name: /ARGプロジェクト 2/ }).click();
+  await expect(page.getByLabel('プロジェクト名')).toHaveValue('ARGプロジェクト 2');
+
+  await page.getByRole('button', { name: 'プロジェクトを削除' }).click();
+  await answerConfirmation(page, 'ARGプロジェクト 2', 'プロジェクトを削除');
+  await expect(page.getByLabel('プロジェクト名')).toHaveValue('保持するプロジェクト');
+  await expect(page.getByText('ARGプロジェクト 2 を削除しました')).toBeVisible();
+});
+
+test('pages panel confirms duplicate and delete actions', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /^ページ/ }).click();
+  await expect(page.locator('.row')).toHaveCount(1);
+
+  await page.locator('.icon-actions button[title="複製"]').first().click();
+  await answerConfirmation(page, 'Opening Page', 'キャンセル');
+  await expect(page.locator('.row')).toHaveCount(1);
+
+  await page.locator('.icon-actions button[title="複製"]').first().click();
+  await answerConfirmation(page, 'Opening Page', '複製');
+  await expect(page.locator('.row')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: /Opening Page のコピー/ })).toBeVisible();
+
+  await page.locator('.icon-actions button[title="削除"]').last().click();
+  await answerConfirmation(page, 'Opening Page のコピー', 'キャンセル');
+  await expect(page.locator('.row')).toHaveCount(2);
+
+  await page.locator('.icon-actions button[title="削除"]').last().click();
+  await answerConfirmation(page, 'Opening Page のコピー', '削除');
+  await expect(page.locator('.row')).toHaveCount(1);
+});
+
+test('confirmation modal is required every time', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /^ページ/ }).click();
+
+  await page.locator('.icon-actions button[title="複製"]').first().click();
+  await answerConfirmation(page, 'Opening Page', '複製');
+  await expect(page.locator('.row')).toHaveCount(2);
+
+  await page.locator('.icon-actions button[title="複製"]').first().click();
+  await expect(page.getByRole('dialog')).toContainText('Opening Page');
+  await page.getByRole('dialog').getByRole('button', { name: '複製' }).click();
+  await expect(page.locator('.row')).toHaveCount(3);
+});
+
+test('close warning appears after edits until a project backup is exported', async ({ page }) => {
+  await page.goto('/');
+  await expect.poll(async () => isBeforeUnloadBlocked(page)).toBe(false);
+
+  await page.getByRole('button', { name: 'エディタ', exact: true }).click();
+  await page.getByLabel('HTML互換のページ本文').fill('<main><h1>Backup Needed</h1></main>');
+  await expect(page.getByText('プロジェクトバックアップを推奨します')).toBeVisible();
+  await expect(page.getByText('IndexedDB は通常、ブラウザのサイトデータとして保存されます。')).toBeVisible();
+  await expect.poll(async () => isBeforeUnloadBlocked(page)).toBe(true);
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: '今すぐバックアップ' }).click();
+  await downloadPromise;
+  await expect(page.getByText('プロジェクトバックアップを推奨します')).toHaveCount(0);
+  await expect.poll(async () => isBeforeUnloadBlocked(page)).toBe(false);
+});
+
+test('flowchart nodes can be selected and repositioned', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /^フローチャート/ }).click();
+  await expect(page.getByText('選択中のノード: Opening Page')).toBeVisible();
+  await expect(page.locator('.react-flow__node').first()).toHaveClass(/selected/);
+  await expect(page.locator('.flow-table .row.active')).toContainText('Opening Page');
+
+  const node = page.locator('.react-flow__node').first();
+  const before = await node.boundingBox();
+  if (!before) throw new Error('Flowchart node was not visible');
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 + 180, before.y + before.height / 2 + 120, { steps: 8 });
+  await page.mouse.up();
+
+  await expect.poll(async () => {
+    const after = await node.boundingBox();
+    return after ? Math.round(after.x - before.x) : 0;
+  }).toBeGreaterThan(40);
+  await expect.poll(async () => {
+    const after = await node.boundingBox();
+    return after ? Math.round(after.y - before.y) : 0;
+  }).toBeGreaterThan(40);
+  await expect(page.locator('.flow-table .row.active')).toContainText('Opening Page');
+
+  await expect(page.getByRole('button', { name: 'エッジ追加' })).toBeDisabled();
+  await page.getByRole('button', { name: 'ノード追加' }).click();
+  await expect(page.getByLabel('From（接続元）')).toHaveValue(/.+/);
+  await expect(page.getByLabel('To（接続先）')).toHaveValue(/.+/);
+  await expect.poll(async () => page.getByLabel('From（接続元）').evaluate((select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent)).toBe(
+    'From: Opening Page'
+  );
+  await expect.poll(async () => page.getByLabel('To（接続先）').evaluate((select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent)).toBe(
+    'To: ノード 2'
+  );
+  await expect(page.locator('.react-flow__node.edge-source')).toHaveCount(1);
+  await expect(page.locator('.react-flow__node.edge-target')).toHaveCount(1);
+  await expect(page.getByLabel('Opening Page のノード名').locator('xpath=ancestor::div[contains(@class, "row")][1]')).toHaveClass(/edge-source/);
+  await expect(page.getByLabel('ノード 2 のノード名').locator('xpath=ancestor::div[contains(@class, "row")][1]')).toHaveClass(/edge-target/);
+  await expect(page.getByText('Opening Page から ノード 2 へ接続します。')).toBeVisible();
+  await page.getByRole('button', { name: 'エッジ追加' }).click();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(page.getByText('この接続はすでにあります。')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'エッジ追加' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'エッジ削除' }).click();
+  await answerConfirmation(page, 'Opening Page から ノード 2', 'エッジ削除');
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'エッジ追加' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'エッジ追加' }).click();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await page.getByRole('button', { name: 'ノード 2 を削除' }).click();
+  await answerConfirmation(page, 'ノード 2', '削除');
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
+  await expect(page.getByLabel('ノード 2 のノード名')).toHaveCount(0);
 });
 
 test('theme workspace edits CSS with a live preview surface', async ({ page }) => {
@@ -44,7 +208,7 @@ test('theme workspace edits CSS with a live preview surface', async ({ page }) =
 
 test('preview width follows the browser width until manually changed', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'エディタ' }).click();
+  await page.getByRole('button', { name: 'エディタ', exact: true }).click();
 
   const editorPreview = page.locator('.preview-frame-shell');
   await expect.poll(async () => editorPreview.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBeGreaterThan(420);

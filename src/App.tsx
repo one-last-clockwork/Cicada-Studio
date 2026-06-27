@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
-import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react';
+import { Background, Controls, MarkerType, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import {
+  AlertTriangle,
   Archive,
   CheckCircle2,
   ChevronRight,
@@ -14,6 +15,7 @@ import {
   GitBranch,
   Globe2,
   Image,
+  Info,
   KeyRound,
   Languages,
   LayoutDashboard,
@@ -41,7 +43,7 @@ import { buildPublicExportZip } from './lib/export-public/publicExport';
 import { checkPublicExportZip } from './lib/export-public/checkLeaks';
 import { escapeHtml, renderThemeDocument } from './lib/html/sanitize';
 import { createId, createPage, createProject, nowIso, touchProject } from './lib/projects/createProject';
-import { listProjects, saveProject } from './lib/db/projectsDb';
+import { deleteProject as deleteStoredProject, listProjects, saveProject } from './lib/db/projectsDb';
 import { normalizeAssetPath, normalizePublicPath, safeSlug } from './lib/path-safety/pathSafety';
 import { downloadBlob } from './lib/zip/blob';
 import { splitTermList } from './lib/crypto/normalization';
@@ -65,6 +67,15 @@ const PREVIEW_MIN_WIDTH = 240;
 const PREVIEW_MAX_WIDTH = 2400;
 const PREVIEW_MIN_HEIGHT = 240;
 const PREVIEW_MAX_HEIGHT = 2000;
+const SOURCE_CODE_URL = 'https://github.com/one-last-clockwork/Cicada-Studio';
+const OUTPUT_LICENSE_URL = `${SOURCE_CODE_URL}/blob/main/LICENCE-OUTPUT.md`;
+
+interface ConfirmationRequest {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone?: 'default' | 'danger';
+}
 
 const I18nContext = createContext<UiText>(UI_TEXT.ja);
 
@@ -268,12 +279,22 @@ export default function App(): JSX.Element {
   const text = UI_TEXT[language];
   const [project, setProject] = useState<StudioProject>(() => createProject(UI_TEXT.ja.defaultProjectName));
   const [selectedPageId, setSelectedPageId] = useState(project.pages[0]?.id ?? '');
-  const [selectedTab, setSelectedTab] = useState<StudioTab>('dashboard');
+  const [selectedTab, setSelectedTab] = useState<StudioTab>('intro');
   const [knownProjects, setKnownProjects] = useState<StudioProject[]>([]);
   const [loadState, setLoadState] = useState<string>(UI_TEXT.ja.loading);
   const [saveState, setSaveState] = useState<string>(UI_TEXT.ja.notSaved);
   const [exportState, setExportState] = useState<string>('');
+  const [projectsChangedSinceBackup, setProjectsChangedSinceBackup] = useState<Record<string, boolean>>({});
+  const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null);
   const firstSave = useRef(true);
+  const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
+  const showProjectTopbar = selectedTab !== 'intro' && selectedTab !== 'projects';
+  const hasChangesSinceBackup = useMemo(() => Object.values(projectsChangedSinceBackup).some(Boolean), [projectsChangedSinceBackup]);
+  const currentProjectChangedSinceBackup = Boolean(projectsChangedSinceBackup[project.id]);
+  const changedSinceBackupProjectCount = useMemo(
+    () => Object.values(projectsChangedSinceBackup).filter(Boolean).length,
+    [projectsChangedSinceBackup]
+  );
 
   useEffect(() => {
     let alive = true;
@@ -300,6 +321,19 @@ export default function App(): JSX.Element {
   }, [language]);
 
   useEffect(() => {
+    if (!hasChangesSinceBackup) {
+      return undefined;
+    }
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = text.backupBeforeCloseWarning;
+      return text.backupBeforeCloseWarning;
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasChangesSinceBackup, text.backupBeforeCloseWarning]);
+
+  useEffect(() => {
     if (firstSave.current) {
       firstSave.current = false;
       return;
@@ -320,7 +354,23 @@ export default function App(): JSX.Element {
   );
 
   function updateProject(updater: (draft: StudioProject) => StudioProject): void {
+    markProjectChangedSinceBackup(project.id);
     setProject((current) => touchProject(updater(current)));
+  }
+
+  function markProjectChangedSinceBackup(projectId: string): void {
+    setProjectsChangedSinceBackup((current) => (current[projectId] ? current : { ...current, [projectId]: true }));
+  }
+
+  function clearProjectChangedSinceBackup(projectId: string): void {
+    setProjectsChangedSinceBackup((current) => {
+      if (!current[projectId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[projectId];
+      return next;
+    });
   }
 
   function updatePage(pageId: string, updater: (page: StudioPage) => StudioPage): void {
@@ -330,25 +380,81 @@ export default function App(): JSX.Element {
     }));
   }
 
-  function createNewProject(): void {
+  function requestConfirmation(request: ConfirmationRequest): Promise<boolean> {
+    if (confirmationResolver.current) {
+      confirmationResolver.current(false);
+    }
+    return new Promise((resolve) => {
+      confirmationResolver.current = resolve;
+      setConfirmationRequest(request);
+    });
+  }
+
+  function resolveConfirmation(confirmed: boolean): void {
+    confirmationResolver.current?.(confirmed);
+    confirmationResolver.current = null;
+    setConfirmationRequest(null);
+  }
+
+  function createNewProject(targetTab: StudioTab = 'dashboard'): void {
     const next = createProject(text.newProjectName(knownProjects.length + 1));
     setProject(next);
     setKnownProjects((projects) => [next, ...projects]);
+    markProjectChangedSinceBackup(next.id);
     setSelectedPageId(next.pages[0]?.id ?? '');
-    setSelectedTab('dashboard');
+    setSelectedTab(targetTab);
     setSaveState(text.newProjectCreated);
   }
 
   async function switchProject(projectId: string): Promise<void> {
-    const stored = await listProjects();
-    const next = stored.find((item) => item.id === projectId) ?? knownProjects.find((item) => item.id === projectId);
-    if (!next) {
+    if (projectId === project.id) {
       return;
     }
-    setKnownProjects(stored.length ? stored : knownProjects);
-    setProject(next);
-    setSelectedPageId(next.pages[0]?.id ?? '');
-    setSaveState(text.loaded(next.name));
+    try {
+      await saveProject(project);
+      const stored = await listProjects();
+      const mergedProjects = [...stored, ...knownProjects.filter((item) => !stored.some((storedProject) => storedProject.id === item.id))];
+      const next = mergedProjects.find((item) => item.id === projectId);
+      if (!next) {
+        return;
+      }
+      setKnownProjects(mergedProjects);
+      setProject(next);
+      setSelectedPageId(next.pages[0]?.id ?? '');
+      setSaveState(text.loaded(next.name));
+    } catch (error: unknown) {
+      setSaveState(error instanceof Error ? error.message : text.autosaveFailed);
+    }
+  }
+
+  async function deleteCurrentProject(): Promise<void> {
+    const confirmed = await requestConfirmation({
+      title: text.deleteProject,
+      message: text.deleteProjectConfirm(project.name),
+      confirmLabel: text.deleteProject,
+      tone: 'danger'
+    });
+    if (!confirmed) {
+      return;
+    }
+    const deletedName = project.name;
+    try {
+      await deleteStoredProject(project.id);
+      const remaining = await listProjects();
+      const next = remaining[0] ?? createProject(text.defaultProjectName);
+      if (!remaining.length) {
+        await saveProject(next);
+      }
+      setKnownProjects(remaining.length ? remaining : [next]);
+      clearProjectChangedSinceBackup(project.id);
+      firstSave.current = true;
+      setProject(next);
+      setSelectedPageId(next.pages[0]?.id ?? '');
+      setLoadState(text.loaded(next.name));
+      setSaveState(text.deletedProject(deletedName));
+    } catch (error: unknown) {
+      setSaveState(error instanceof Error ? error.message : text.autosaveFailed);
+    }
   }
 
   function addPage(): void {
@@ -364,7 +470,15 @@ export default function App(): JSX.Element {
     setSelectedTab('editor');
   }
 
-  function duplicatePage(page: StudioPage): void {
+  async function duplicatePage(page: StudioPage): Promise<void> {
+    const confirmed = await requestConfirmation({
+      title: text.duplicate,
+      message: text.duplicatePageConfirm(page.title),
+      confirmLabel: text.duplicate
+    });
+    if (!confirmed) {
+      return;
+    }
     const copy = {
       ...page,
       id: createId('page'),
@@ -377,8 +491,21 @@ export default function App(): JSX.Element {
     setSelectedPageId(copy.id);
   }
 
-  function deletePage(pageId: string): void {
+  async function deletePage(pageId: string): Promise<void> {
     if (project.pages.length === 1) {
+      return;
+    }
+    const targetPage = project.pages.find((page) => page.id === pageId);
+    if (!targetPage) {
+      return;
+    }
+    const confirmed = await requestConfirmation({
+      title: text.delete,
+      message: text.deletePageConfirm(targetPage.title),
+      confirmLabel: text.delete,
+      tone: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     updateProject((current) => {
@@ -488,8 +615,8 @@ export default function App(): JSX.Element {
       id: createId('node'),
       label: text.flowNode(flow.nodes.length + 1),
       pageId: selectedPage?.id,
-      x: 90 + flow.nodes.length * 80,
-      y: 100
+      x: 90 + (flow.nodes.length % 4) * 220,
+      y: 100 + Math.floor(flow.nodes.length / 4) * 130
     };
     updateProject((current) => ({
       ...current,
@@ -497,12 +624,12 @@ export default function App(): JSX.Element {
     }));
   }
 
-  function addFlowEdge(flow: StudioFlowchart): void {
-    if (flow.nodes.length < 2) return;
+  function addFlowEdge(flow: StudioFlowchart, sourceId: string, targetId: string): void {
+    if (!sourceId || !targetId || sourceId === targetId || flow.edges.some((edge) => edge.source === sourceId && edge.target === targetId)) return;
     const edge: FlowEdge = {
       id: createId('edge'),
-      source: flow.nodes[flow.nodes.length - 2].id,
-      target: flow.nodes[flow.nodes.length - 1].id,
+      source: sourceId,
+      target: targetId,
       label: text.routeLabel
     };
     updateProject((current) => ({
@@ -579,6 +706,7 @@ export default function App(): JSX.Element {
   async function exportBackup(): Promise<void> {
     const blob = await exportProjectBackupZip(project);
     downloadBlob(blob, `${safeSlug(project.name, 'cicada-project')}-backup.zip`);
+    clearProjectChangedSinceBackup(project.id);
   }
 
   async function importBackup(file: File | undefined): Promise<void> {
@@ -586,6 +714,7 @@ export default function App(): JSX.Element {
     const imported = await importProjectBackupZip(await readFileAsArrayBuffer(file));
     setProject(touchProject(imported));
     setKnownProjects((projects) => [imported, ...projects.filter((item) => item.id !== imported.id)]);
+    clearProjectChangedSinceBackup(imported.id);
     setSelectedPageId(imported.pages[0]?.id ?? '');
     setExportState(text.importedBackup(file.name));
   }
@@ -595,6 +724,7 @@ export default function App(): JSX.Element {
     const imported = await importYachoProjectZip(await readFileAsArrayBuffer(file));
     setProject(imported);
     setKnownProjects((projects) => [imported, ...projects]);
+    markProjectChangedSinceBackup(imported.id);
     setSelectedPageId(imported.pages[0]?.id ?? '');
     setExportState(text.importedYacho(file.name));
   }
@@ -615,55 +745,81 @@ export default function App(): JSX.Element {
     <I18nContext.Provider value={text}>
       <div className="app-shell">
         <Sidebar project={project} selectedTab={selectedTab} onSelectTab={setSelectedTab} />
-        <div className="app-main">
-          <header className="topbar">
-            <div className="topbar-project">
-              <label className="project-name-field">
-                <span>{text.projectName}</span>
-                <input
-                  className="project-title"
-                  value={project.name}
-                  aria-label={text.projectName}
-                  onChange={(event) => updateProject((current) => ({ ...current, name: event.target.value }))}
-                />
-              </label>
-              <select className="project-switcher" value={project.id} aria-label={text.openProject} onChange={(event) => void switchProject(event.target.value)}>
-                {knownProjects.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="topbar-meta">
-              <label className="language-select">
-                <Languages size={16} />
-                <span>{text.languageLabel}</span>
-                <select value={language} aria-label={text.languageLabel} onChange={(event) => setLanguage(event.target.value as Language)}>
-                  <option value="ja">{text.japanese}</option>
-                  <option value="en">{text.english}</option>
+        <div className={showProjectTopbar ? 'app-main' : 'app-main no-topbar-main'}>
+          {showProjectTopbar && (
+            <header className="topbar">
+              <div className="topbar-project">
+                <label className="project-name-field">
+                  <span>{text.projectName}</span>
+                  <input
+                    className="project-title"
+                    value={project.name}
+                    aria-label={text.projectName}
+                    onChange={(event) => updateProject((current) => ({ ...current, name: event.target.value }))}
+                  />
+                </label>
+                <select className="project-switcher" value={project.id} aria-label={text.openProject} onChange={(event) => void switchProject(event.target.value)}>
+                  {knownProjects.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
                 </select>
-              </label>
-              <div className="save-summary" aria-live="polite">
-                <CheckCircle2 size={18} />
-                <strong>{saveState}</strong>
-                <span>{loadState}</span>
               </div>
-            </div>
-            <div className="topbar-actions">
-              <button type="button" onClick={manualSave} title={text.manualSave}>
-                <Save size={16} /> {text.save}
-              </button>
-              <button type="button" onClick={createNewProject} title={text.newProject}>
-                <FilePlus size={16} /> {text.newProject}
-              </button>
-              <button type="button" onClick={createSnapshot} title={text.createSnapshot}>
-                <Archive size={16} /> {text.snapshot}
-              </button>
-            </div>
-          </header>
+              <div className="topbar-meta">
+                <label className="language-select">
+                  <Languages size={16} />
+                  <span>{text.languageLabel}</span>
+                  <select value={language} aria-label={text.languageLabel} onChange={(event) => setLanguage(event.target.value as Language)}>
+                    <option value="ja">{text.japanese}</option>
+                    <option value="en">{text.english}</option>
+                  </select>
+                </label>
+                <div className="save-summary" aria-live="polite">
+                  <CheckCircle2 size={18} />
+                  <strong>{saveState}</strong>
+                  <span>{loadState}</span>
+                </div>
+              </div>
+              <div className="topbar-actions">
+                <button type="button" onClick={manualSave} title={text.manualSave}>
+                  <Save size={16} /> {text.save}
+                </button>
+                <button type="button" onClick={() => createNewProject()} title={text.newProject}>
+                  <FilePlus size={16} /> {text.newProject}
+                </button>
+                <button type="button" onClick={createSnapshot} title={text.createSnapshot}>
+                  <Archive size={16} /> {text.snapshot}
+                </button>
+              </div>
+            </header>
+          )}
 
           <main className="workspace">
+            {hasChangesSinceBackup && (
+              <BackupReminderBanner
+                currentProjectChangedSinceBackup={currentProjectChangedSinceBackup}
+                changedProjectCount={changedSinceBackupProjectCount}
+                exportBackup={exportBackup}
+                openProjectManagement={() => setSelectedTab('projects')}
+              />
+            )}
+            {selectedTab === 'intro' && <SystemIntro setTab={setSelectedTab} />}
+            {selectedTab === 'projects' && (
+              <ProjectManagementPanel
+                project={project}
+                knownProjects={knownProjects}
+                loadState={loadState}
+                saveState={saveState}
+                language={language}
+                setLanguage={setLanguage}
+                updateProject={updateProject}
+                switchProject={switchProject}
+                createNewProject={createNewProject}
+                manualSave={manualSave}
+                deleteCurrentProject={deleteCurrentProject}
+              />
+            )}
             {selectedTab === 'dashboard' && (
               <Dashboard
                 project={project}
@@ -704,7 +860,15 @@ export default function App(): JSX.Element {
               <AssetsPanel project={project} selectedPage={selectedPage} addAssets={addAssets} updateProject={updateProject} updatePage={updatePage} />
             )}
             {selectedTab === 'themes' && <ThemesPanel project={project} addTheme={addTheme} updateTheme={updateTheme} updateProject={updateProject} />}
-            {selectedTab === 'flowchart' && <FlowchartPanel project={project} addFlowNode={addFlowNode} addFlowEdge={addFlowEdge} updateProject={updateProject} />}
+            {selectedTab === 'flowchart' && (
+              <FlowchartPanel
+                project={project}
+                addFlowNode={addFlowNode}
+                addFlowEdge={addFlowEdge}
+                updateProject={updateProject}
+                requestConfirmation={requestConfirmation}
+              />
+            )}
             {selectedTab === 'search' && (
               <SearchPanel project={project} addSearchRule={addSearchRule} updateSearchRule={updateSearchRule} updateProject={updateProject} />
             )}
@@ -724,11 +888,19 @@ export default function App(): JSX.Element {
           </main>
         </div>
       </div>
+      <ConfirmationDialog
+        request={confirmationRequest}
+        text={text}
+        onCancel={() => resolveConfirmation(false)}
+        onConfirm={() => resolveConfirmation(true)}
+      />
     </I18nContext.Provider>
   );
 }
 
 const TAB_ICONS: Record<StudioTab, LucideIcon> = {
+  intro: Info,
+  projects: FolderOpen,
   dashboard: LayoutDashboard,
   pages: FileText,
   editor: FilePlus,
@@ -751,7 +923,7 @@ function Sidebar({
 }): JSX.Element {
   const text = useUiText();
   const groups: Array<{ label: string; tabs: StudioTab[] }> = [
-    { label: text.navOverview, tabs: ['dashboard', 'pages', 'flowchart'] },
+    { label: text.navOverview, tabs: ['intro', 'projects', 'dashboard', 'pages', 'flowchart'] },
     { label: text.navWriting, tabs: ['editor', 'assets', 'themes'] },
     { label: text.navPublishing, tabs: ['search', 'conditions', 'export'] }
   ];
@@ -821,6 +993,219 @@ function getTabCount(project: StudioProject, tab: StudioTab): number | null {
     default:
       return null;
   }
+}
+
+function SystemIntro({ setTab }: { setTab: (tab: StudioTab) => void }): JSX.Element {
+  const text = useUiText();
+  return (
+    <section className="intro-page" aria-labelledby="system-intro-title">
+      <section className="intro-overview">
+        <div className="intro-copy">
+          <span className="section-kicker">{text.introKicker}</span>
+          <h1 id="system-intro-title">
+            {text.introTitleSegments.map((segment, index) => (
+              <span key={segment}>
+                {index > 0 && ' '}
+                {segment}
+              </span>
+            ))}
+          </h1>
+          <p>
+            {text.introLeadSegments.map((segment, index) => (
+              <span key={`${segment}-${index}`}>{segment}</span>
+            ))}
+          </p>
+          <div className="intro-actions">
+            <button type="button" className="primary-action" onClick={() => setTab('dashboard')}>
+              <LayoutDashboard size={17} /> {text.introOpenDashboard}
+            </button>
+            <button type="button" onClick={() => setTab('projects')}>
+              <FolderOpen size={17} /> {text.introOpenProjects}
+            </button>
+            <button type="button" onClick={() => setTab('editor')}>
+              <FilePlus size={17} /> {text.introOpenEditor}
+            </button>
+            <a className="button-link" href={SOURCE_CODE_URL} target="_blank" rel="noreferrer">
+              <Globe2 size={17} /> {text.introSourceCode}
+            </a>
+          </div>
+        </div>
+        <div className="intro-signal-list" aria-label={text.introKicker}>
+          <div>
+            <ShieldCheck size={19} />
+            <span>{text.localFirst}</span>
+            <strong>{text.noNetwork}</strong>
+          </div>
+          <div>
+            <Download size={19} />
+            <span>{text.publicStaticSite}</span>
+            <strong>{text.manualExport}</strong>
+          </div>
+        </div>
+      </section>
+
+      <div className="intro-feature-grid">
+        {text.introHighlights.map((item) => (
+          <article key={item.title} className="intro-card">
+            <CheckCircle2 size={20} />
+            <h2>{item.title}</h2>
+            <p>{item.copy}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="intro-detail-grid">
+        <section className="intro-panel">
+          <div className="panel-head">
+            <div>
+              <h2>{text.introLicenseTitle}</h2>
+              <p>{text.introLicenseLead}</p>
+            </div>
+            <a className="button-link" href={OUTPUT_LICENSE_URL} target="_blank" rel="noreferrer">
+              <FileText size={17} /> {text.introLicenseDocs}
+            </a>
+          </div>
+          <dl className="intro-license-list">
+            {text.introLicenseRows.map((row) => (
+              <div key={row.title}>
+                <dt>{row.title}</dt>
+                <dd>{row.copy}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section className="intro-panel intro-note-panel">
+          <div>
+            <Globe2 size={21} />
+            <h2>{text.introCommercialTitle}</h2>
+            <p>{text.introCommercialCopy}</p>
+          </div>
+          <div>
+            <ClipboardCheck size={21} />
+            <h2>{text.introCreditTitle}</h2>
+            <p>{text.introCreditCopy}</p>
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function ProjectManagementPanel({
+  project,
+  knownProjects,
+  loadState,
+  saveState,
+  language,
+  setLanguage,
+  updateProject,
+  switchProject,
+  createNewProject,
+  manualSave,
+  deleteCurrentProject
+}: {
+  project: StudioProject;
+  knownProjects: StudioProject[];
+  loadState: string;
+  saveState: string;
+  language: Language;
+  setLanguage: (language: Language) => void;
+  updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
+  switchProject: (projectId: string) => Promise<void>;
+  createNewProject: (targetTab?: StudioTab) => void;
+  manualSave: () => Promise<void>;
+  deleteCurrentProject: () => Promise<void>;
+}): JSX.Element {
+  const text = useUiText();
+  const projectOptions = useMemo(
+    () => [project, ...knownProjects.filter((item) => item.id !== project.id)],
+    [knownProjects, project]
+  );
+
+  return (
+    <section className="panel project-manager-page">
+      <div className="section-head">
+        <div>
+          <span className="section-kicker">{text.tabs.projects}</span>
+          <h2>{text.projectManagementTitle}</h2>
+          <p>{text.projectManagementCopy}</p>
+        </div>
+        <StatusBadge tone="neutral">{text.projectCount(projectOptions.length)}</StatusBadge>
+      </div>
+      <div className="project-manager-grid">
+        <label className="project-name-field">
+          <span>{text.projectName}</span>
+          <input
+            className="project-title"
+            value={project.name}
+            aria-label={text.projectName}
+            onChange={(event) => updateProject((current) => ({ ...current, name: event.target.value }))}
+          />
+        </label>
+        <label className="language-select project-language-select">
+          <Languages size={16} />
+          <span>{text.languageLabel}</span>
+          <select value={language} aria-label={text.languageLabel} onChange={(event) => setLanguage(event.target.value as Language)}>
+            <option value="ja">{text.japanese}</option>
+            <option value="en">{text.english}</option>
+          </select>
+        </label>
+      </div>
+      <section className="project-list-panel" aria-labelledby="project-list-heading">
+        <div className="project-list-head">
+          <div>
+            <h3 id="project-list-heading">{text.projectListTitle}</h3>
+            <p>{text.projectListCopy}</p>
+          </div>
+          <StatusBadge tone="neutral">{text.projectCount(projectOptions.length)}</StatusBadge>
+        </div>
+        <div className="project-list">
+          {projectOptions.map((item) => {
+            const active = item.id === project.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={active ? 'project-list-row active' : 'project-list-row'}
+                aria-current={active ? 'page' : undefined}
+                onClick={() => {
+                  if (!active) {
+                    void switchProject(item.id);
+                  }
+                }}
+              >
+                <FolderOpen size={18} aria-hidden="true" />
+                <span className="project-list-copy">
+                  <strong>{item.name}</strong>
+                  <small>
+                    {item.pages.length} {text.metricPages} · {text.projectUpdated(formatDate(item.updatedAt))}
+                  </small>
+                </span>
+                {active ? <StatusBadge tone="green">{text.activeProject}</StatusBadge> : <ChevronRight size={17} aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      <div className="project-manager-actions">
+        <button type="button" onClick={() => void manualSave()} title={text.manualSave}>
+          <Save size={16} /> {text.save}
+        </button>
+        <button type="button" onClick={() => createNewProject('projects')} title={text.newProject}>
+          <FilePlus size={16} /> {text.newProject}
+        </button>
+        <button type="button" className="danger-action" onClick={() => void deleteCurrentProject()} title={text.deleteProject}>
+          <Trash2 size={16} /> {text.deleteProject}
+        </button>
+      </div>
+      <div className="project-manager-status" aria-live="polite">
+        <CheckCircle2 size={18} />
+        <strong>{saveState}</strong>
+        <span>{loadState}</span>
+      </div>
+    </section>
+  );
 }
 
 function Dashboard({
@@ -1028,6 +1413,100 @@ function StatusBadge({ children, tone }: { children: string; tone: 'green' | 'am
   return <span className={`status-badge ${tone}`}>{children}</span>;
 }
 
+function BackupReminderBanner({
+  currentProjectChangedSinceBackup,
+  changedProjectCount,
+  exportBackup,
+  openProjectManagement
+}: {
+  currentProjectChangedSinceBackup: boolean;
+  changedProjectCount: number;
+  exportBackup: () => Promise<void>;
+  openProjectManagement: () => void;
+}): JSX.Element {
+  const text = useUiText();
+  return (
+    <section className="backup-reminder-banner" aria-live="polite">
+      <span className="backup-reminder-icon">
+        <AlertTriangle size={19} aria-hidden="true" />
+      </span>
+      <div>
+        <strong>{text.backupReminderTitle}</strong>
+        <p>{currentProjectChangedSinceBackup ? text.backupReminderCopy : text.backupReminderOtherProjectCopy(changedProjectCount)}</p>
+      </div>
+      {currentProjectChangedSinceBackup ? (
+        <button type="button" className="primary-action" onClick={() => void exportBackup()}>
+          <Download size={16} /> {text.backupReminderAction}
+        </button>
+      ) : (
+        <button type="button" onClick={openProjectManagement}>
+          <FolderOpen size={16} /> {text.tabs.projects}
+        </button>
+      )}
+    </section>
+  );
+}
+
+function ConfirmationDialog({
+  request,
+  text,
+  onCancel,
+  onConfirm
+}: {
+  request: ConfirmationRequest | null;
+  text: UiText;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): JSX.Element | null {
+  useEffect(() => {
+    if (!request) {
+      return undefined;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel, request]);
+
+  if (!request) {
+    return null;
+  }
+
+  const Icon = request.tone === 'danger' ? AlertTriangle : Info;
+
+  return (
+    <div className="confirmation-backdrop" role="presentation">
+      <section
+        className={request.tone === 'danger' ? 'confirmation-dialog danger' : 'confirmation-dialog'}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirmation-title"
+      >
+        <div className="confirmation-head">
+          <span className="confirmation-icon">
+            <Icon size={20} aria-hidden="true" />
+          </span>
+          <div>
+            <h2 id="confirmation-title">{request.title}</h2>
+            <p>{request.message}</p>
+          </div>
+        </div>
+        <div className="confirmation-actions">
+          <button type="button" onClick={onCancel}>
+            {text.cancelAction}
+          </button>
+          <button type="button" className={request.tone === 'danger' ? 'danger-action' : 'primary-action'} onClick={onConfirm}>
+            {request.confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ChecklistRow({ done, label }: { done: boolean; label: string }): JSX.Element {
   const text = useUiText();
   return (
@@ -1055,8 +1534,8 @@ function PagesPanel(props: {
   project: StudioProject;
   selectedPageId: string;
   onAdd: () => void;
-  onDuplicate: (page: StudioPage) => void;
-  onDelete: (pageId: string) => void;
+  onDuplicate: (page: StudioPage) => void | Promise<void>;
+  onDelete: (pageId: string) => void | Promise<void>;
   onMove: (pageId: string, direction: -1 | 1) => void;
   onSelect: (pageId: string) => void;
   onUpdate: (pageId: string, updater: (page: StudioPage) => StudioPage) => void;
@@ -1098,10 +1577,10 @@ function PagesPanel(props: {
               <button type="button" title={text.moveDown} onClick={() => props.onMove(page.id, 1)}>
                 <MoveDown size={16} />
               </button>
-              <button type="button" title={text.duplicate} onClick={() => props.onDuplicate(page)}>
+              <button type="button" title={text.duplicate} onClick={() => void props.onDuplicate(page)}>
                 <Copy size={16} />
               </button>
-              <button type="button" title={text.delete} onClick={() => props.onDelete(page.id)}>
+              <button type="button" title={text.delete} onClick={() => void props.onDelete(page.id)}>
                 <Trash2 size={16} />
               </button>
             </div>
@@ -1466,42 +1945,245 @@ function getThemePreviewHtml(theme: StudioTheme, text: UiText): string {
 function FlowchartPanel(props: {
   project: StudioProject;
   addFlowNode: (flow: StudioFlowchart) => void;
-  addFlowEdge: (flow: StudioFlowchart) => void;
+  addFlowEdge: (flow: StudioFlowchart, sourceId: string, targetId: string) => void;
   updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
+  requestConfirmation: (request: ConfirmationRequest) => Promise<boolean>;
 }): JSX.Element {
   const text = useUiText();
   const flow = props.project.flowcharts[0];
+  const [selectedFlowNodeId, setSelectedFlowNodeId] = useState(flow.nodes[0]?.id ?? '');
+  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [edgeDraft, setEdgeDraft] = useState({
+    sourceId: flow.nodes[0]?.id ?? '',
+    targetId: flow.nodes[1]?.id ?? flow.nodes[0]?.id ?? ''
+  });
+  const selectedFlowNode = flow.nodes.find((node) => node.id === selectedFlowNodeId);
+
+  useEffect(() => {
+    setNodePositions((positions) => {
+      const next: Record<string, { x: number; y: number }> = {};
+      for (const node of flow.nodes) {
+        next[node.id] = positions[node.id] ?? { x: node.x, y: node.y };
+      }
+      return next;
+    });
+    if (!flow.nodes.some((node) => node.id === selectedFlowNodeId)) {
+      setSelectedFlowNodeId(flow.nodes[0]?.id ?? '');
+    }
+  }, [flow.nodes, selectedFlowNodeId]);
+
+  useEffect(() => {
+    setEdgeDraft((current) => {
+      const nodeIds = flow.nodes.map((node) => node.id);
+      const sourceId = nodeIds.includes(current.sourceId) ? current.sourceId : nodeIds[0] ?? '';
+      let targetId = nodeIds.includes(current.targetId) ? current.targetId : (nodeIds.find((id) => id !== sourceId) ?? nodeIds[0] ?? '');
+      if (sourceId === targetId && nodeIds.length > 1) {
+        targetId = nodeIds.find((id) => id !== sourceId) ?? targetId;
+      }
+      return sourceId === current.sourceId && targetId === current.targetId ? current : { sourceId, targetId };
+    });
+  }, [flow.nodes]);
+
   const nodes: Node[] = flow.nodes.map((node) => ({
     id: node.id,
-    position: { x: node.x, y: node.y },
+    position: nodePositions[node.id] ?? { x: node.x, y: node.y },
     data: { label: node.label },
-    type: 'default'
+    type: 'default',
+    selected: node.id === selectedFlowNodeId,
+    className: getFlowNodeClassName(node.id)
   }));
-  const edges: Edge[] = flow.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, label: edge.label }));
+  const edges: Edge[] = flow.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    label: edge.label,
+    markerEnd: { type: MarkerType.ArrowClosed },
+    className: 'flow-edge'
+  }));
+  const edgeSourceNode = flow.nodes.find((node) => node.id === edgeDraft.sourceId);
+  const edgeTargetNode = flow.nodes.find((node) => node.id === edgeDraft.targetId);
+  const selectedDraftEdge = flow.edges.find((edge) => edge.source === edgeDraft.sourceId && edge.target === edgeDraft.targetId);
+  const edgeAlreadyExists = Boolean(selectedDraftEdge);
+  const canCreateEdge = Boolean(edgeSourceNode && edgeTargetNode && edgeDraft.sourceId !== edgeDraft.targetId && !edgeAlreadyExists);
+  const edgeStatus =
+    flow.nodes.length < 2
+      ? text.edgeNeedsTwoNodes
+      : edgeDraft.sourceId === edgeDraft.targetId
+        ? text.edgeSelectDifferentNodes
+        : edgeAlreadyExists
+          ? text.edgeAlreadyExists
+          : edgeSourceNode && edgeTargetNode
+            ? text.edgeReady(edgeSourceNode.label, edgeTargetNode.label)
+            : text.edgeNeedsTwoNodes;
+  function getFlowNodeClassName(nodeId: string): string {
+    return [
+      'flow-node',
+      nodeId === selectedFlowNodeId ? 'selected' : '',
+      nodeId === edgeDraft.sourceId ? 'edge-source' : '',
+      nodeId === edgeDraft.targetId ? 'edge-target' : ''
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+  function getFlowRowClassName(nodeId: string): string {
+    return [
+      'row',
+      nodeId === selectedFlowNodeId ? 'active' : '',
+      nodeId === edgeDraft.sourceId ? 'edge-source' : '',
+      nodeId === edgeDraft.targetId ? 'edge-target' : ''
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+  async function deleteFlowNode(node: FlowNode): Promise<void> {
+    const confirmed = await props.requestConfirmation({
+      title: text.deleteFlowNode(node.label),
+      message: text.deleteFlowNodeConfirm(node.label),
+      confirmLabel: text.delete,
+      tone: 'danger'
+    });
+    if (!confirmed) {
+      return;
+    }
+    setNodePositions((positions) => {
+      const next = { ...positions };
+      delete next[node.id];
+      return next;
+    });
+    props.updateProject((current) => ({
+      ...current,
+      flowcharts: current.flowcharts.map((item) =>
+        item.id === flow.id
+          ? {
+              ...item,
+              nodes: item.nodes.filter((target) => target.id !== node.id),
+              edges: item.edges.filter((edge) => edge.source !== node.id && edge.target !== node.id)
+            }
+          : item
+      )
+    }));
+  }
+  async function deleteSelectedEdge(): Promise<void> {
+    if (!selectedDraftEdge || !edgeSourceNode || !edgeTargetNode) {
+      return;
+    }
+    const confirmed = await props.requestConfirmation({
+      title: text.deleteEdge,
+      message: text.deleteEdgeConfirm(edgeSourceNode.label, edgeTargetNode.label),
+      confirmLabel: text.deleteEdge,
+      tone: 'danger'
+    });
+    if (!confirmed) {
+      return;
+    }
+    props.updateProject((current) => ({
+      ...current,
+      flowcharts: current.flowcharts.map((item) =>
+        item.id === flow.id ? { ...item, edges: item.edges.filter((edge) => edge.id !== selectedDraftEdge.id) } : item
+      )
+    }));
+  }
   return (
     <section className="flow-layout">
       <div className="section-head">
-        <h2>{text.tabs.flowchart}</h2>
+        <div>
+          <h2>{text.tabs.flowchart}</h2>
+          <p>{selectedFlowNode ? text.selectedFlowNode(selectedFlowNode.label) : text.noFlowNodeSelected}</p>
+        </div>
         <div className="button-row">
           <button type="button" onClick={() => props.addFlowNode(flow)}>
             <Plus size={16} /> {text.addNode}
           </button>
-          <button type="button" onClick={() => props.addFlowEdge(flow)}>
-            <Plus size={16} /> {text.addEdge}
-          </button>
         </div>
       </div>
       <div className="flow-canvas">
-        <ReactFlow nodes={nodes} edges={edges} fitView>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          nodesDraggable
+          nodesConnectable={false}
+          onNodeClick={(_, node) => setSelectedFlowNodeId(node.id)}
+          onNodeDrag={(_, node) => {
+            setSelectedFlowNodeId(node.id);
+            setNodePositions((positions) => ({ ...positions, [node.id]: node.position }));
+          }}
+          onNodeDragStop={(_, node) => {
+            setSelectedFlowNodeId(node.id);
+            setNodePositions((positions) => ({ ...positions, [node.id]: node.position }));
+            props.updateProject((current) => ({
+              ...current,
+              flowcharts: current.flowcharts.map((item) =>
+                item.id === flow.id
+                  ? {
+                      ...item,
+                      nodes: item.nodes.map((target) =>
+                        target.id === node.id ? { ...target, x: Math.round(node.position.x), y: Math.round(node.position.y) } : target
+                      )
+                    }
+                  : item
+              )
+            }));
+          }}
+        >
           <Background />
           <Controls />
         </ReactFlow>
       </div>
+      <div className="flow-edge-editor" aria-label={text.edgeEditorTitle}>
+        <div className="flow-edge-copy">
+          <strong>{text.edgeEditorTitle}</strong>
+          <span>{edgeStatus}</span>
+        </div>
+        <label className="flow-edge-field source">
+          <span>{text.edgeSource}</span>
+          <select
+            value={edgeDraft.sourceId}
+            aria-label={text.edgeSource}
+            onChange={(event) => {
+              const sourceId = event.target.value;
+              setEdgeDraft((current) => ({
+                sourceId,
+                targetId: current.targetId === sourceId ? (flow.nodes.find((node) => node.id !== sourceId)?.id ?? current.targetId) : current.targetId
+              }));
+            }}
+          >
+            {flow.nodes.map((node) => (
+              <option key={node.id} value={node.id}>
+                {node.id === edgeDraft.sourceId ? text.edgeSourceOption(node.label) : node.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flow-edge-field target">
+          <span>{text.edgeTarget}</span>
+          <select
+            value={edgeDraft.targetId}
+            aria-label={text.edgeTarget}
+            onChange={(event) => setEdgeDraft((current) => ({ ...current, targetId: event.target.value }))}
+          >
+            {flow.nodes.map((node) => (
+              <option key={node.id} value={node.id}>
+                {node.id === edgeDraft.targetId ? text.edgeTargetOption(node.label) : node.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flow-edge-actions">
+          <button type="button" disabled={!canCreateEdge} onClick={() => props.addFlowEdge(flow, edgeDraft.sourceId, edgeDraft.targetId)}>
+            <Plus size={16} /> {text.addEdge}
+          </button>
+          <button type="button" className="danger-action" disabled={!selectedDraftEdge} onClick={() => void deleteSelectedEdge()}>
+            <Trash2 size={16} /> {text.deleteEdge}
+          </button>
+        </div>
+      </div>
       <div className="flow-table">
         {flow.nodes.map((node) => (
-          <div key={node.id} className="row">
+          <div key={node.id} className={getFlowRowClassName(node.id)} onFocus={() => setSelectedFlowNodeId(node.id)}>
             <input
               value={node.label}
+              aria-label={text.flowNodeLabel(node.label)}
               onChange={(event) =>
                 props.updateProject((current) => ({
                   ...current,
@@ -1515,6 +2197,7 @@ function FlowchartPanel(props: {
             />
             <select
               value={node.pageId ?? ''}
+              aria-label={text.flowNodePage(node.label)}
               onChange={(event) =>
                 props.updateProject((current) => ({
                   ...current,
@@ -1533,6 +2216,11 @@ function FlowchartPanel(props: {
                 </option>
               ))}
             </select>
+            <div className="icon-actions">
+              <button type="button" className="danger-action" title={text.deleteFlowNode(node.label)} aria-label={text.deleteFlowNode(node.label)} onClick={() => void deleteFlowNode(node)}>
+                <Trash2 size={16} />
+              </button>
+            </div>
           </div>
         ))}
       </div>

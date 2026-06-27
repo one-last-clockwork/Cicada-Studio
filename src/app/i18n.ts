@@ -39,6 +39,8 @@ export const UI_TEXT = {
     snapshot: 'スナップショット',
     tabsLabel: '制作セクション',
     tabs: {
+      intro: 'システム紹介',
+      projects: 'プロジェクト管理',
       dashboard: 'ダッシュボード',
       pages: 'ページ',
       editor: 'エディタ',
@@ -49,6 +51,70 @@ export const UI_TEXT = {
       conditions: '条件',
       export: '書き出し'
     } satisfies Record<StudioTab, string>,
+    introKicker: 'システム紹介',
+    introTitleSegments: ['Cicada Studio は、', 'ARG 制作を', 'ローカルで組み立てる', '静的サイト制作ツールです'],
+    introLeadSegments: [
+      'ページ本文、手がかり、分岐、',
+      '暗号化された reveal / unlock / search、',
+      'CSS テーマ、公開用 zip を',
+      'ひとつの制作画面で管理します。',
+      '制作データはブラウザ内に保存され、',
+      '公開物は静的 HTML/CSS/JS として',
+      '分離して書き出されます。'
+    ],
+    introOpenDashboard: 'ダッシュボードへ',
+    introOpenProjects: 'プロジェクト管理へ',
+    introOpenEditor: 'エディタを開く',
+    introSourceCode: 'GitHubでソースコードを見る',
+    introLicenseDocs: 'ライセンス文書を見る',
+    projectManagementTitle: 'プロジェクト管理',
+    projectManagementCopy: '制作プロジェクトの切り替え、新規作成、保存、削除をここで行います。',
+    projectCount: (count: number) => `${count} 件`,
+    projectListTitle: 'プロジェクト一覧',
+    projectListCopy: '開きたいプロジェクトを一覧から選択します。現在のプロジェクト名は上で編集できます。',
+    activeProject: '選択中',
+    projectUpdated: (date: string) => `更新 ${date}`,
+    deleteProject: 'プロジェクトを削除',
+    deleteProjectConfirm: (name: string) => `「${name}」を削除します。この操作は元に戻せません。`,
+    deletedProject: (name: string) => `${name} を削除しました`,
+    cancelAction: 'キャンセル',
+    introHighlights: [
+      {
+        title: 'ローカルファースト',
+        copy: '制作中のプロジェクトデータは IndexedDB に保存され、公開 export は手動で作成します。'
+      },
+      {
+        title: '静的サイトとして公開',
+        copy: '公開 zip には静的 HTML/CSS/assets/runtime JS と、暗号化された payload だけを含めます。'
+      },
+      {
+        title: 'ARG 向けの導線設計',
+        copy: 'ページ、検索手がかり、reveal、unlock、条件分岐、フローチャートを同じ制作環境で扱えます。'
+      }
+    ],
+    introLicenseTitle: 'ライセンスと制作物の扱い',
+    introLicenseLead:
+      'Cicada Studio 本体は AGPL v3.0 のライセンスです。ソースコードは GitHub で公開されています。',
+    introLicenseRows: [
+      {
+        title: 'Studio 本体',
+        copy: '本システムは AGPL v3.0 のライセンスで公開されています。'
+      },
+      {
+        title: '制作物',
+        copy: 'AGPL v3.0 は、本システムを使用して制作された作品、プロジェクトデータ、公開サイト内容には適用されません。'
+      },
+      {
+        title: '詳しい条件',
+        copy: '詳しくは GitHub リポジトリ上の LICENSE と LICENCE-OUTPUT.md を確認してください。'
+      }
+    ],
+    introCommercialTitle: '商用利用',
+    introCommercialCopy:
+      '有償・無償を問わず、Cicada Studio を使って制作した作品は商用利用できます。作品自体のライセンスや販売条件は、制作者が自由に決められます。',
+    introCreditTitle: 'クレジット表記について',
+    introCreditCopy:
+      '可能であれば、エンドロール、導入ページ、制作協力欄などに Cicada Studio を利用した旨を書いてもらえると助かります。ただしこれは必須ではありません。ARG の構成上クレジットを置けない場合や、表記したくない場合は、表記なしで問題ありません。',
     dashboardTitle: '制作ダッシュボード',
     dashboardCopy:
       'ブラウザ内の IndexedDB に制作データを保存します。公開物は reveal / unlock / search の暗号 payload を持つ静的 zip として分離して書き出します。',
@@ -115,7 +181,9 @@ export const UI_TEXT = {
     moveUp: '上へ',
     moveDown: '下へ',
     duplicate: '複製',
+    duplicatePageConfirm: (title: string) => `「${title}」を複製しますか？`,
     delete: '削除',
+    deletePageConfirm: (title: string) => `「${title}」を削除します。この操作は元に戻せません。`,
     page: 'ページ',
     title: 'タイトル',
     slug: 'Slug',
@@ -162,6 +230,23 @@ export const UI_TEXT = {
     enableAdvancedScriptPreview: 'ページ側も opt-in した場合に限り上級者向け script preview を有効化',
     addNode: 'ノード追加',
     addEdge: 'エッジ追加',
+    selectedFlowNode: (label: string) => `選択中のノード: ${label}`,
+    noFlowNodeSelected: 'ノードを選択するとここに表示されます。',
+    flowNodeLabel: (label: string) => `${label} のノード名`,
+    flowNodePage: (label: string) => `${label} の連携ページ`,
+    edgeEditorTitle: 'エッジ作成',
+    edgeSource: 'From（接続元）',
+    edgeTarget: 'To（接続先）',
+    edgeSourceOption: (label: string) => `From: ${label}`,
+    edgeTargetOption: (label: string) => `To: ${label}`,
+    edgeReady: (source: string, target: string) => `${source} から ${target} へ接続します。`,
+    edgeNeedsTwoNodes: 'エッジ作成にはノードが2つ以上必要です。',
+    edgeSelectDifferentNodes: 'From と To には別のノードを選んでください。',
+    edgeAlreadyExists: 'この接続はすでにあります。',
+    deleteFlowNode: (label: string) => `${label} を削除`,
+    deleteFlowNodeConfirm: (label: string) => `「${label}」を削除します。関連するエッジも削除されます。`,
+    deleteEdge: 'エッジ削除',
+    deleteEdgeConfirm: (source: string, target: string) => `${source} から ${target} へのエッジを削除しますか？`,
     noPage: 'ページなし',
     encryptedSearch: '暗号化検索',
     addRule: 'ルール追加',
@@ -176,6 +261,14 @@ export const UI_TEXT = {
     projectBackupCopy: 'バックアップ zip には作者用データ、下書き、メモ、答え、flowchart、assets が含まれます。',
     exportBackupZip: 'バックアップ Zip 書き出し',
     importBackupZip: 'バックアップ Zip 読み込み',
+    backupBeforeCloseWarning:
+      'IndexedDB は通常、ブラウザのサイトデータとして保存されます。ただし、Cookie/サイトデータの削除、プライベートブラウズの終了、ブラウザや端末のストレージ整理、Safari等のブラウザポリシーによって失われる場合があります。念のためプロジェクトバックアップを推奨します。',
+    backupReminderTitle: 'プロジェクトバックアップを推奨します',
+    backupReminderCopy:
+      'IndexedDB は通常、ブラウザのサイトデータとして保存されます。ただし、Cookie/サイトデータの削除、プライベートブラウズの終了、ブラウザや端末のストレージ整理、Safari等のブラウザポリシーによって失われる場合があります。念のためバックアップ Zip を書き出してください。',
+    backupReminderOtherProjectCopy: (count: number) =>
+      `${count} 件のプロジェクトに、最後のバックアップ以降の変更・編集履歴があります。該当プロジェクトを開いて、念のためバックアップ Zip を書き出してください。`,
+    backupReminderAction: '今すぐバックアップ',
     publicStaticSite: '公開静的サイト',
     publicStaticSiteCopy: '公開 zip は静的 HTML/CSS/assets/runtime JS だけを含み、download 前に漏洩と path traversal を検査します。',
     exportPublicZip: '公開 Zip 書き出し',
@@ -235,6 +328,8 @@ export const UI_TEXT = {
     snapshot: 'Snapshot',
     tabsLabel: 'Studio sections',
     tabs: {
+      intro: 'System Guide',
+      projects: 'Project Management',
       dashboard: 'Dashboard',
       pages: 'Pages',
       editor: 'Editor',
@@ -245,6 +340,70 @@ export const UI_TEXT = {
       conditions: 'Conditions',
       export: 'Export'
     } satisfies Record<StudioTab, string>,
+    introKicker: 'System Guide',
+    introTitleSegments: ['Cicada Studio is a', 'local-first static site studio', 'for ARG production'],
+    introLeadSegments: [
+      'Manage page bodies, clues, routes, ',
+      'encrypted reveal / unlock / search payloads, ',
+      'CSS themes, and public zip exports ',
+      'from one production workspace. ',
+      'Authoring data stays in the browser, ',
+      'while public output is exported as ',
+      'separate static HTML/CSS/JS.'
+    ],
+    introOpenDashboard: 'Open dashboard',
+    introOpenProjects: 'Open project management',
+    introOpenEditor: 'Open editor',
+    introSourceCode: 'View source on GitHub',
+    introLicenseDocs: 'View license documents',
+    projectManagementTitle: 'Project management',
+    projectManagementCopy: 'Switch, create, save, and delete local production projects here.',
+    projectCount: (count: number) => `${count} project${count === 1 ? '' : 's'}`,
+    projectListTitle: 'Project list',
+    projectListCopy: 'Select a project from the list. Edit the current project name above.',
+    activeProject: 'Active',
+    projectUpdated: (date: string) => `Updated ${date}`,
+    deleteProject: 'Delete project',
+    deleteProjectConfirm: (name: string) => `Delete "${name}"? This cannot be undone.`,
+    deletedProject: (name: string) => `Deleted ${name}`,
+    cancelAction: 'Cancel',
+    introHighlights: [
+      {
+        title: 'Local first',
+        copy: 'Project data is stored in IndexedDB, and public exports are created only when you choose to export.'
+      },
+      {
+        title: 'Static public sites',
+        copy: 'Public zips contain static HTML/CSS/assets/runtime JS and encrypted payloads only.'
+      },
+      {
+        title: 'ARG route design',
+        copy: 'Pages, search clues, reveals, unlock pages, conditions, and flowcharts live in the same authoring environment.'
+      }
+    ],
+    introLicenseTitle: 'License and output terms',
+    introLicenseLead:
+      'Cicada Studio itself is licensed under AGPL v3.0. The source code is published on GitHub.',
+    introLicenseRows: [
+      {
+        title: 'Studio application',
+        copy: 'This system is released under the AGPL v3.0 license.'
+      },
+      {
+        title: 'User works',
+        copy: 'AGPL v3.0 does not apply to works, project data, or public site content created with this system.'
+      },
+      {
+        title: 'Full terms',
+        copy: 'For details, read LICENSE and LICENCE-OUTPUT.md in the GitHub repository.'
+      }
+    ],
+    introCommercialTitle: 'Commercial use',
+    introCommercialCopy:
+      'Works made with Cicada Studio may be used commercially, whether paid or free. Creators decide the license and sales terms for their own works.',
+    introCreditTitle: 'Credit note',
+    introCreditCopy:
+      'When it fits the work, please consider mentioning that Cicada Studio was used in an end roll, introduction page, or production note. This is optional. Some ARGs cannot include credits cleanly, and some creators may prefer not to mention their tools.',
     dashboardTitle: 'Production Dashboard',
     dashboardCopy:
       'Browser-only project data lives in IndexedDB. Public output is a separate static zip with encrypted reveal, unlock, and search payloads.',
@@ -311,7 +470,9 @@ export const UI_TEXT = {
     moveUp: 'Move up',
     moveDown: 'Move down',
     duplicate: 'Duplicate',
+    duplicatePageConfirm: (title: string) => `Duplicate "${title}"?`,
     delete: 'Delete',
+    deletePageConfirm: (title: string) => `Delete "${title}"? This cannot be undone.`,
     page: 'Page',
     title: 'Title',
     slug: 'Slug',
@@ -358,6 +519,23 @@ export const UI_TEXT = {
     enableAdvancedScriptPreview: 'Enable advanced script preview for pages that also opt in',
     addNode: 'Node',
     addEdge: 'Edge',
+    selectedFlowNode: (label: string) => `Selected node: ${label}`,
+    noFlowNodeSelected: 'Select a node to show it here.',
+    flowNodeLabel: (label: string) => `${label} node label`,
+    flowNodePage: (label: string) => `${label} linked page`,
+    edgeEditorTitle: 'Create edge',
+    edgeSource: 'From',
+    edgeTarget: 'To',
+    edgeSourceOption: (label: string) => `From: ${label}`,
+    edgeTargetOption: (label: string) => `To: ${label}`,
+    edgeReady: (source: string, target: string) => `Connect ${source} to ${target}.`,
+    edgeNeedsTwoNodes: 'Create at least two nodes before adding an edge.',
+    edgeSelectDifferentNodes: 'Choose different nodes for From and To.',
+    edgeAlreadyExists: 'This connection already exists.',
+    deleteFlowNode: (label: string) => `Delete ${label}`,
+    deleteFlowNodeConfirm: (label: string) => `Delete "${label}"? Related edges will also be removed.`,
+    deleteEdge: 'Delete edge',
+    deleteEdgeConfirm: (source: string, target: string) => `Delete the edge from ${source} to ${target}?`,
     noPage: 'No page',
     encryptedSearch: 'Encrypted Search',
     addRule: 'Add Rule',
@@ -372,6 +550,14 @@ export const UI_TEXT = {
     projectBackupCopy: 'Backup zip includes author-only project data, drafts, notes, answers, flowcharts, and assets.',
     exportBackupZip: 'Export Backup Zip',
     importBackupZip: 'Import Backup Zip',
+    backupBeforeCloseWarning:
+      'IndexedDB is normally stored as browser site data. However, data may be lost when cookies/site data are deleted, private browsing ends, browser or device storage is cleaned up, or browser policies such as Safari policies apply. Creating a project backup is recommended.',
+    backupReminderTitle: 'Project backup recommended',
+    backupReminderCopy:
+      'IndexedDB is normally stored as browser site data. However, data may be lost when cookies/site data are deleted, private browsing ends, browser or device storage is cleaned up, or browser policies such as Safari policies apply. Exporting a backup zip is recommended.',
+    backupReminderOtherProjectCopy: (count: number) =>
+      `${count} project${count === 1 ? ' has' : 's have'} changes since the last backup. Open the affected project and export a backup zip.`,
+    backupReminderAction: 'Back up now',
     publicStaticSite: 'Public Static Site',
     publicStaticSiteCopy: 'Public zip contains static HTML/CSS/assets/runtime JS only. Leakage and path traversal checks run before download.',
     exportPublicZip: 'Export Public Zip',
