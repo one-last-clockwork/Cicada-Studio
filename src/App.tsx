@@ -2,22 +2,35 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import {
   Archive,
+  CheckCircle2,
+  ChevronRight,
+  Circle,
+  ClipboardCheck,
   Copy,
   Download,
   FilePlus,
+  FileText,
   FolderOpen,
+  GitBranch,
+  Globe2,
   Image,
   KeyRound,
+  Languages,
+  LayoutDashboard,
+  LockKeyhole,
   MoveDown,
   MoveUp,
+  Palette,
   Plus,
+  Route,
   Save,
   Search,
   ShieldCheck,
   Trash2,
-  Upload
+  Upload,
+  type LucideIcon
 } from 'lucide-react';
-import { studioTabs, type StudioTab } from './app/routes';
+import { type StudioTab } from './app/routes';
 import { isLanguage, LANGUAGE_STORAGE_KEY, UI_TEXT, type Language, type UiText } from './app/i18n';
 import { exportProjectBackupZip, importProjectBackupZip } from './features/backup/backupZip';
 import { importYachoProjectZip } from './features/import-yacho/importYacho';
@@ -430,159 +443,441 @@ export default function App(): JSX.Element {
   return (
     <I18nContext.Provider value={text}>
       <div className="app-shell">
-        <header className="topbar">
-        <div>
-          <span className="eyebrow">{text.appEyebrow}</span>
-          <input
-            className="project-title"
-            value={project.name}
-            aria-label={text.projectName}
-            onChange={(event) => updateProject((current) => ({ ...current, name: event.target.value }))}
-          />
-          <select className="project-switcher" value={project.id} aria-label={text.openProject} onChange={(event) => void switchProject(event.target.value)}>
-            {knownProjects.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="topbar-actions">
-          <label className="language-select">
-            {text.languageLabel}
-            <select value={language} aria-label={text.languageLabel} onChange={(event) => setLanguage(event.target.value as Language)}>
-              <option value="ja">{text.japanese}</option>
-              <option value="en">{text.english}</option>
-            </select>
-          </label>
-          <span className="status">{loadState}</span>
-          <span className="status">{saveState}</span>
-          <button type="button" onClick={manualSave} title={text.manualSave}>
-            <Save size={16} /> {text.save}
-          </button>
-          <button type="button" onClick={createNewProject} title={text.newProject}>
-            <FilePlus size={16} /> {text.newProject}
-          </button>
-          <button type="button" onClick={createSnapshot} title={text.createSnapshot}>
-            <Archive size={16} /> {text.snapshot}
-          </button>
-        </div>
-      </header>
+        <Sidebar project={project} selectedTab={selectedTab} onSelectTab={setSelectedTab} />
+        <div className="app-main">
+          <header className="topbar">
+            <div className="topbar-project">
+              <label className="project-name-field">
+                <span>{text.projectName}</span>
+                <input
+                  className="project-title"
+                  value={project.name}
+                  aria-label={text.projectName}
+                  onChange={(event) => updateProject((current) => ({ ...current, name: event.target.value }))}
+                />
+              </label>
+              <select className="project-switcher" value={project.id} aria-label={text.openProject} onChange={(event) => void switchProject(event.target.value)}>
+                {knownProjects.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="topbar-meta">
+              <label className="language-select">
+                <Languages size={16} />
+                <span>{text.languageLabel}</span>
+                <select value={language} aria-label={text.languageLabel} onChange={(event) => setLanguage(event.target.value as Language)}>
+                  <option value="ja">{text.japanese}</option>
+                  <option value="en">{text.english}</option>
+                </select>
+              </label>
+              <div className="save-summary" aria-live="polite">
+                <CheckCircle2 size={18} />
+                <strong>{saveState}</strong>
+                <span>{loadState}</span>
+              </div>
+            </div>
+            <div className="topbar-actions">
+              <button type="button" onClick={manualSave} title={text.manualSave}>
+                <Save size={16} /> {text.save}
+              </button>
+              <button type="button" onClick={createNewProject} title={text.newProject}>
+                <FilePlus size={16} /> {text.newProject}
+              </button>
+              <button type="button" onClick={createSnapshot} title={text.createSnapshot}>
+                <Archive size={16} /> {text.snapshot}
+              </button>
+            </div>
+          </header>
 
-      <nav className="tabs" aria-label={text.tabsLabel}>
-        {studioTabs.map((tab) => (
-          <button
-            type="button"
-            key={tab.id}
-            className={selectedTab === tab.id ? 'active' : ''}
-            onClick={() => setSelectedTab(tab.id)}
-          >
-            {text.tabs[tab.id]}
-          </button>
-        ))}
-      </nav>
-
-      <main className="workspace">
-        {selectedTab === 'dashboard' && <Dashboard project={project} setTab={setSelectedTab} />}
-        {selectedTab === 'pages' && (
-          <PagesPanel
-            project={project}
-            selectedPageId={selectedPage?.id ?? ''}
-            onAdd={addPage}
-            onDuplicate={duplicatePage}
-            onDelete={deletePage}
-            onMove={movePage}
-            onSelect={(id) => {
-              setSelectedPageId(id);
-              setSelectedTab('editor');
-            }}
-            onUpdate={updatePage}
-          />
-        )}
-        {selectedTab === 'editor' && selectedPage && (
-          <EditorPanel
-            project={project}
-            page={selectedPage}
-            setSelectedPageId={setSelectedPageId}
-            updatePage={updatePage}
-            addRevealBlock={addRevealBlock}
-            updateReveal={updateReveal}
-            addUnlockPage={addUnlockPage}
-            updateUnlock={updateUnlock}
-          />
-        )}
-        {selectedTab === 'assets' && (
-          <AssetsPanel project={project} selectedPage={selectedPage} addAssets={addAssets} updateProject={updateProject} updatePage={updatePage} />
-        )}
-        {selectedTab === 'themes' && <ThemesPanel project={project} addTheme={addTheme} updateTheme={updateTheme} updateProject={updateProject} />}
-        {selectedTab === 'flowchart' && <FlowchartPanel project={project} addFlowNode={addFlowNode} addFlowEdge={addFlowEdge} updateProject={updateProject} />}
-        {selectedTab === 'search' && (
-          <SearchPanel project={project} addSearchRule={addSearchRule} updateSearchRule={updateSearchRule} updateProject={updateProject} />
-        )}
-        {selectedTab === 'conditions' && (
-          <ConditionsPanel project={project} addCondition={addCondition} updateCondition={updateCondition} updateProject={updateProject} />
-        )}
-        {selectedTab === 'export' && (
-          <ExportPanel
-            project={project}
-            exportState={exportState}
-            exportBackup={exportBackup}
-            importBackup={importBackup}
-            importYacho={importYacho}
-            exportPublic={exportPublic}
-          />
-        )}
-        </main>
+          <main className="workspace">
+            {selectedTab === 'dashboard' && (
+              <Dashboard
+                project={project}
+                selectedPageId={selectedPage?.id ?? ''}
+                onSelectPage={setSelectedPageId}
+                onAddPage={addPage}
+                setTab={setSelectedTab}
+              />
+            )}
+            {selectedTab === 'pages' && (
+              <PagesPanel
+                project={project}
+                selectedPageId={selectedPage?.id ?? ''}
+                onAdd={addPage}
+                onDuplicate={duplicatePage}
+                onDelete={deletePage}
+                onMove={movePage}
+                onSelect={(id) => {
+                  setSelectedPageId(id);
+                  setSelectedTab('editor');
+                }}
+                onUpdate={updatePage}
+              />
+            )}
+            {selectedTab === 'editor' && selectedPage && (
+              <EditorPanel
+                project={project}
+                page={selectedPage}
+                setSelectedPageId={setSelectedPageId}
+                updatePage={updatePage}
+                addRevealBlock={addRevealBlock}
+                updateReveal={updateReveal}
+                addUnlockPage={addUnlockPage}
+                updateUnlock={updateUnlock}
+              />
+            )}
+            {selectedTab === 'assets' && (
+              <AssetsPanel project={project} selectedPage={selectedPage} addAssets={addAssets} updateProject={updateProject} updatePage={updatePage} />
+            )}
+            {selectedTab === 'themes' && <ThemesPanel project={project} addTheme={addTheme} updateTheme={updateTheme} updateProject={updateProject} />}
+            {selectedTab === 'flowchart' && <FlowchartPanel project={project} addFlowNode={addFlowNode} addFlowEdge={addFlowEdge} updateProject={updateProject} />}
+            {selectedTab === 'search' && (
+              <SearchPanel project={project} addSearchRule={addSearchRule} updateSearchRule={updateSearchRule} updateProject={updateProject} />
+            )}
+            {selectedTab === 'conditions' && (
+              <ConditionsPanel project={project} addCondition={addCondition} updateCondition={updateCondition} updateProject={updateProject} />
+            )}
+            {selectedTab === 'export' && (
+              <ExportPanel
+                project={project}
+                exportState={exportState}
+                exportBackup={exportBackup}
+                importBackup={importBackup}
+                importYacho={importYacho}
+                exportPublic={exportPublic}
+              />
+            )}
+          </main>
+        </div>
       </div>
     </I18nContext.Provider>
   );
 }
 
-function Dashboard({ project, setTab }: { project: StudioProject; setTab: (tab: StudioTab) => void }): JSX.Element {
+const TAB_ICONS: Record<StudioTab, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  pages: FileText,
+  editor: FilePlus,
+  assets: Image,
+  themes: Palette,
+  flowchart: GitBranch,
+  search: Search,
+  conditions: LockKeyhole,
+  export: Download
+};
+
+function Sidebar({
+  project,
+  selectedTab,
+  onSelectTab
+}: {
+  project: StudioProject;
+  selectedTab: StudioTab;
+  onSelectTab: (tab: StudioTab) => void;
+}): JSX.Element {
   const text = useUiText();
-  const published = project.pages.filter((page) => page.status === 'published').length;
+  const groups: Array<{ label: string; tabs: StudioTab[] }> = [
+    { label: text.navOverview, tabs: ['dashboard', 'pages', 'flowchart'] },
+    { label: text.navWriting, tabs: ['editor', 'assets', 'themes'] },
+    { label: text.navPublishing, tabs: ['search', 'conditions', 'export'] }
+  ];
+
   return (
-    <section className="dashboard-grid">
-      <div className="summary-panel">
-        <h2>{text.dashboardTitle}</h2>
-        <p>{text.dashboardCopy}</p>
-        <div className="metric-row">
-          <Metric label={text.metricPages} value={project.pages.length} />
-          <Metric label={text.metricPublished} value={published} />
-          <Metric label={text.metricAssets} value={project.assets.length} />
-          <Metric label={text.metricRules} value={project.searchRules.length} />
-          <Metric label={text.metricSnapshots} value={project.snapshots.length} />
+    <aside className="app-sidebar">
+      <div className="brand-lockup">
+        <div className="brand-mark">
+          <KeyRound size={24} />
+        </div>
+        <div>
+          <strong>Cicada Studio</strong>
+          <span>{text.appEyebrow}</span>
         </div>
       </div>
-      <div className="action-grid">
-        <button type="button" onClick={() => setTab('editor')}>
-          <FilePlus size={18} /> {text.editPages}
-        </button>
-        <button type="button" onClick={() => setTab('assets')}>
-          <Image size={18} /> {text.manageAssets}
-        </button>
-        <button type="button" onClick={() => setTab('search')}>
-          <Search size={18} /> {text.searchRules}
-        </button>
-        <button type="button" onClick={() => setTab('export')}>
-          <ShieldCheck size={18} /> {text.exportChecks}
+      <nav className="sidebar-nav" aria-label={text.tabsLabel}>
+        {groups.map((group) => (
+          <div key={group.label} className="nav-group">
+            <span className="nav-group-label">{group.label}</span>
+            {group.tabs.map((tab) => {
+              const Icon = TAB_ICONS[tab];
+              const count = getTabCount(project, tab);
+              return (
+                <button type="button" key={tab} className={selectedTab === tab ? 'active' : ''} onClick={() => onSelectTab(tab)}>
+                  <Icon size={18} />
+                  <span>{text.tabs[tab]}</span>
+                  {count !== null && <em>{count}</em>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+      <div className="local-card">
+        <strong>
+          <ShieldCheck size={18} /> {text.localFirst}
+        </strong>
+        <span>{text.localFirstCopy}</span>
+        <ul>
+          <li>
+            <CheckCircle2 size={15} /> {text.noNetwork}
+          </li>
+          <li>
+            <CheckCircle2 size={15} /> {text.manualExport}
+          </li>
+        </ul>
+        <button type="button" onClick={() => onSelectTab('export')}>
+          {text.securityAbout}
         </button>
       </div>
-      <div className="notice-panel">
-        <h3>{text.encryptionBoundary}</h3>
-        <p>{text.encryptionBoundaryCopy}</p>
+    </aside>
+  );
+}
+
+function getTabCount(project: StudioProject, tab: StudioTab): number | null {
+  switch (tab) {
+    case 'pages':
+      return project.pages.length;
+    case 'assets':
+      return project.assets.length;
+    case 'flowchart':
+      return project.flowcharts[0]?.nodes.length ?? 0;
+    case 'search':
+      return project.searchRules.length;
+    case 'conditions':
+      return project.conditions.length;
+    default:
+      return null;
+  }
+}
+
+function Dashboard({
+  project,
+  selectedPageId,
+  onSelectPage,
+  onAddPage,
+  setTab
+}: {
+  project: StudioProject;
+  selectedPageId: string;
+  onSelectPage: (pageId: string) => void;
+  onAddPage: () => void;
+  setTab: (tab: StudioTab) => void;
+}): JSX.Element {
+  const text = useUiText();
+  const selectedPage = project.pages.find((page) => page.id === selectedPageId) ?? project.pages[0];
+  const published = project.pages.filter((page) => page.status === 'published').length;
+  const draft = project.pages.length - published;
+  const unlockCount = project.pages.reduce((count, page) => count + page.unlockPages.length, 0);
+  const clueCount = project.searchRules.length + project.conditions.length + project.pages.reduce((count, page) => count + page.revealBlocks.length, 0);
+  const checks = [
+    project.pages.every((page) => page.title.trim() && stripHtml(page.bodyHtml).length > 0),
+    project.searchRules.length > 0 || project.conditions.length > 0 || project.pages.some((page) => page.revealBlocks.length > 0 || page.unlockPages.length > 0),
+    project.pages.every((page) => page.path.trim().endsWith('.html')),
+    project.snapshots.length > 0
+  ];
+  const readiness = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  const selectedRules = selectedPage ? project.searchRules.filter((rule) => rule.targetPageId === selectedPage.id) : [];
+  const selectedConditions = selectedPage
+    ? project.conditions.filter((condition) => condition.sourcePageId === selectedPage.id || condition.targetPageId === selectedPage.id)
+    : [];
+  const flowNodes = project.flowcharts[0]?.nodes ?? [];
+
+  return (
+    <section className="case-board">
+      <div className="case-board-head">
+        <div>
+          <span className="section-kicker">{text.studioNav}</span>
+          <h1>{text.caseBoardTitle}</h1>
+          <p>{text.caseBoardCopy}</p>
+        </div>
+        <button type="button" className="primary-action" onClick={() => setTab('export')}>
+          <ClipboardCheck size={17} /> {text.exportChecks}
+        </button>
       </div>
+
+      <div className="metric-row">
+        <Metric icon={FileText} label={text.totalPages} value={`${project.pages.length}`} detail={text.metricPages} />
+        <Metric icon={Globe2} label={text.publishablePages} value={`${published}`} detail={`${Math.round((published / Math.max(project.pages.length, 1)) * 100)}%`} />
+        <Metric icon={LockKeyhole} label={text.secretPages} value={`${draft}`} detail={text.draft} />
+        <Metric icon={KeyRound} label={text.clueCount} value={`${clueCount}`} detail={text.searchRules} />
+        <Metric icon={Route} label={text.unlockCount} value={`${unlockCount}`} detail={text.conditionsRoutes} />
+        <Metric icon={ClipboardCheck} label={text.exportReadiness} value={`${readiness}%`} detail={readiness >= 75 ? text.ready : text.needsWork} />
+      </div>
+
+      <div className="case-board-grid">
+        <section className="board-panel pages-ledger">
+          <div className="panel-head">
+            <div>
+              <h2>{text.allPages}</h2>
+              <p>
+                {project.pages.length} {text.metricPages}
+              </p>
+            </div>
+            <button type="button" onClick={onAddPage}>
+              <Plus size={16} /> {text.newPageShort}
+            </button>
+          </div>
+          <div className="page-ledger-list">
+            {project.pages.map((page) => (
+              <button
+                type="button"
+                key={page.id}
+                className={page.id === selectedPage?.id ? 'page-ledger-row active' : 'page-ledger-row'}
+                onClick={() => onSelectPage(page.id)}
+              >
+                <span className="drag-handle">{String(page.pageNumber).padStart(2, '0')}</span>
+                <span>
+                  <strong>{page.title}</strong>
+                  <small>{page.path}</small>
+                </span>
+                <StatusBadge tone={page.status === 'published' ? 'green' : 'amber'}>{page.status === 'published' ? text.published : text.draft}</StatusBadge>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="board-panel flow-overview">
+          <div className="panel-head">
+            <div>
+              <h2>{text.flowOverview}</h2>
+              <p>{text.revealAndUnlock}</p>
+            </div>
+            <button type="button" onClick={() => setTab('flowchart')}>
+              <GitBranch size={16} /> {text.tabs.flowchart}
+            </button>
+          </div>
+          {flowNodes.length ? (
+            <ol className="route-stack">
+              {flowNodes.slice(0, 7).map((node, index) => {
+                const linkedPage = project.pages.find((page) => page.id === node.pageId);
+                return (
+                  <li key={node.id} className={node.pageId === selectedPage?.id ? 'active' : ''}>
+                    <span>{String(index + 1).padStart(2, '0')}</span>
+                    <strong>{node.label}</strong>
+                    <small>{linkedPage?.path ?? text.noPage}</small>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <div className="empty-state">
+              <GitBranch size={28} />
+              <span>{text.noFlowNodes}</span>
+            </div>
+          )}
+        </section>
+
+        <section className="board-panel page-inspector">
+          <div className="panel-head">
+            <div>
+              <h2>{text.selectedPage}</h2>
+              <p>{selectedPage?.title}</p>
+            </div>
+            <StatusBadge tone={selectedPage?.status === 'published' ? 'green' : 'amber'}>
+              {selectedPage?.status === 'published' ? text.published : text.draft}
+            </StatusBadge>
+          </div>
+          {selectedPage && (
+            <>
+              <dl className="inspector-list">
+                <div>
+                  <dt>{text.fileName}</dt>
+                  <dd>{selectedPage.path}</dd>
+                </div>
+                <div>
+                  <dt>{text.theme}</dt>
+                  <dd>{project.themes.find((theme) => theme.id === selectedPage.themeId)?.name ?? text.noPage}</dd>
+                </div>
+                <div>
+                  <dt>{text.updatedAt}</dt>
+                  <dd>{formatDate(project.updatedAt)}</dd>
+                </div>
+                <div>
+                  <dt>{text.htmlBody}</dt>
+                  <dd>{text.bodyChars(stripHtml(selectedPage.bodyHtml).length)}</dd>
+                </div>
+              </dl>
+              <div className="tag-stack">
+                <strong>{text.visibleConditions}</strong>
+                {selectedConditions.length ? (
+                  selectedConditions.map((condition) => <span key={condition.id}>{condition.label}</span>)
+                ) : (
+                  <small>{text.noConditions}</small>
+                )}
+              </div>
+              <div className="tag-stack">
+                <strong>{text.relatedClues}</strong>
+                {selectedRules.length ? selectedRules.map((rule) => <span key={rule.id}>{rule.label}</span>) : <small>{text.noSearchRules}</small>}
+              </div>
+              <div className="quick-actions">
+                <button type="button" className="primary-action" onClick={() => setTab('editor')}>
+                  <FilePlus size={16} /> {text.editThisPage}
+                </button>
+                <button type="button" onClick={() => setTab('editor')}>
+                  <ChevronRight size={16} /> {text.previewThisPage}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+
+      <section className="board-panel checklist-panel">
+        <div className="panel-head">
+          <div>
+            <h2>{text.productionChecklist}</h2>
+            <p>{text.encryptionBoundaryCopy}</p>
+          </div>
+        </div>
+        <div className="checklist">
+          <ChecklistRow done={checks[0]} label={text.checklistTitles} />
+          <ChecklistRow done={checks[1]} label={text.checklistSearch} />
+          <ChecklistRow done={checks[2]} label={text.checklistExportPath} />
+          <ChecklistRow done={checks[3]} label={text.checklistBackup} />
+        </div>
+      </section>
     </section>
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }): JSX.Element {
+function Metric({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: string; value: string; detail: string }): JSX.Element {
   return (
     <div className="metric">
-      <strong>{value}</strong>
+      <Icon size={20} />
       <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
     </div>
   );
+}
+
+function StatusBadge({ children, tone }: { children: string; tone: 'green' | 'amber' | 'neutral' }): JSX.Element {
+  return <span className={`status-badge ${tone}`}>{children}</span>;
+}
+
+function ChecklistRow({ done, label }: { done: boolean; label: string }): JSX.Element {
+  const text = useUiText();
+  return (
+    <div className={done ? 'check-row-item done' : 'check-row-item'}>
+      {done ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+      <span>{label}</span>
+      <strong>{done ? text.ready : text.needsWork}</strong>
+    </div>
+  );
+}
+
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString();
 }
 
 function PagesPanel(props: {
