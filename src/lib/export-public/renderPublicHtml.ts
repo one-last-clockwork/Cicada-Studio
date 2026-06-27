@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Generated public-export copies of the document shell/widgets emitted here are available under the MIT terms in LICENCE-OUTPUT.md.
+
 import type { PublicRuntimePayload, StudioPage, StudioProject, UnlockPage } from '../../types/project';
 import { canRunScriptPreview } from '../../features/preview/previewPolicy';
 import { escapeHtml, escapeStyleText, sanitizeHtml } from '../html/sanitize';

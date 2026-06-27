@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import { expect, test } from '@playwright/test';
 import { buildPublicExportZip } from '../../src/lib/export-public/publicExport';
 import { createId, createProject } from '../../src/lib/projects/createProject';
+import { PUBLIC_EXPORT_LICENSE_FILENAME } from '../../src/public-runtime/outputLicense';
 
 async function servePublicZip(blob: Blob): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
@@ -62,6 +63,8 @@ test('public export zip works from a static server without plaintext secrets', a
   });
 
   const blob = await buildPublicExportZip(project);
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  await expect(await zip.file(PUBLIC_EXPORT_LICENSE_FILENAME)?.async('text')).toContain('MIT License');
   const server = await servePublicZip(blob);
   try {
     await page.goto(server.baseUrl);

@@ -4,6 +4,7 @@ import { buildPublicExportZip } from '../../src/lib/export-public/publicExport';
 import { checkPublicExportZip } from '../../src/lib/export-public/checkLeaks';
 import { decryptText, tryDecryptText } from '../../src/lib/crypto/browserCrypto';
 import { createId, createPage, createProject } from '../../src/lib/projects/createProject';
+import { PUBLIC_EXPORT_LICENSE_FILENAME } from '../../src/public-runtime/outputLicense';
 import type { PublicRuntimePayload } from '../../src/types/project';
 
 async function firstDecrypted(secret: string, entries: Array<{ salt: string; iv: string; ciphertext: string }>): Promise<string | null> {
@@ -17,6 +18,21 @@ async function firstDecrypted(secret: string, entries: Array<{ salt: string; iv:
 }
 
 describe('public export', () => {
+  it('does not treat the generated output license notice as leaked project text', async () => {
+    const project = createProject('License Notice');
+    project.pages[0].revealBlocks.push({
+      id: createId('reveal'),
+      label: 'License phrase',
+      prompt: 'Phrase',
+      answerAliases: ['MIT License'],
+      secretHtml: '<p>licensed output</p>',
+      failureMessage: 'no'
+    });
+
+    const check = await checkPublicExportZip(await buildPublicExportZip(project), project);
+    expect(check.ok).toBe(true);
+  });
+
   it('exports a static site without drafts, flowcharts, answers, or plaintext encrypted payloads', async () => {
     const project = createProject('Leakage Test');
     project.themes[0].css = 'body{color:#111}</style><script>window.__css_breakout="theme leak"</script><style>';
@@ -107,8 +123,12 @@ describe('public export', () => {
     const zip = await JSZip.loadAsync(blob);
     expect(Object.keys(zip.files)).not.toContain('structure.json');
     expect(Object.keys(zip.files)).not.toContain('flowchart.json');
+    expect(Object.keys(zip.files)).toContain(PUBLIC_EXPORT_LICENSE_FILENAME);
     expect(Object.keys(zip.files)).toContain('assets/public-note.txt');
     expect(Object.keys(zip.files)).not.toContain('assets/private-note.txt');
+    const outputLicense = await zip.file(PUBLIC_EXPORT_LICENSE_FILENAME)?.async('text');
+    expect(outputLicense).toContain('MIT License');
+    expect(outputLicense).toContain('user or other rights holder may license those works under any terms they choose');
     const indexHtml = await zip.file('index.html')?.async('text');
     const payloadJson = indexHtml?.match(/<script type="application\/json" id="arg-payload">([\s\S]*?)<\/script>/)?.[1];
     expect(payloadJson).toBeTruthy();

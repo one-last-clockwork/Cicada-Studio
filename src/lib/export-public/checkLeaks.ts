@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import type { ExportCheckResult, ExportFileSummary, LeakageFinding } from '../../types/export';
 import type { StudioProject } from '../../types/project';
+import { PUBLIC_EXPORT_LICENSE_FILENAME } from '../../public-runtime/outputLicense';
 import { hasTraversalPath } from '../path-safety/pathSafety';
 
 const FORBIDDEN_FILENAMES = new Set(['structure.json', 'flowchart.json', 'project.json']);
@@ -88,9 +89,11 @@ export async function checkPublicExportZip(input: Blob | ArrayBuffer, project?: 
         addFinding(findings, path, `Public export contains forbidden marker "${marker}".`);
       }
     }
-    for (const secret of forbiddenProjectText) {
-      if (text.includes(secret)) {
-        addFinding(findings, path, 'Public export contains internal project text or a plain answer.');
+    if (basename !== PUBLIC_EXPORT_LICENSE_FILENAME.toLowerCase()) {
+      for (const secret of forbiddenProjectText) {
+        if (text.includes(secret)) {
+          addFinding(findings, path, 'Public export contains internal project text or a plain answer.');
+        }
       }
     }
   }

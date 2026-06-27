@@ -5,6 +5,7 @@ import type {
   StudioPage,
   StudioProject
 } from '../../types/project';
+import { PUBLIC_EXPORT_LICENSE_FILENAME, PUBLIC_EXPORT_LICENSE_NOTICE } from '../../public-runtime/outputLicense';
 import { PUBLIC_RUNTIME_JS } from '../../public-runtime/runtimeAsset';
 import { encryptText } from '../crypto/browserCrypto';
 import { uniqueNormalized } from '../crypto/normalization';
@@ -221,6 +222,7 @@ export async function buildPublicExportZip(project: StudioProject): Promise<Blob
   }
 
   zip.file('runtime.js', PUBLIC_RUNTIME_JS);
+  zip.file(PUBLIC_EXPORT_LICENSE_FILENAME, PUBLIC_EXPORT_LICENSE_NOTICE);
   const buffer = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
   return new Blob([buffer], { type: 'application/zip' });
 }

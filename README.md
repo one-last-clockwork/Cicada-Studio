@@ -65,3 +65,11 @@ Preview is safe by default: scripts are stripped and the iframe sandbox does not
 Public reveal, unlock, and search payloads use browser Web Crypto with PBKDF2 + AES-GCM. This prevents plaintext secrets from appearing by simply opening exported source, but it does not fully prevent offline brute force against short or guessable answers. Use longer phrases and explicit aliases for Japanese or other spelling variants.
 
 Imported YACHO project scripts are never auto-enabled.
+
+## License
+
+Cicada Studio itself is licensed under AGPL-3.0-or-later. See `LICENSE`.
+
+User-created project data, stories, page content, assets, and published site content are not licensed under AGPL merely because they were created, edited, exported, or deployed with Cicada Studio. Users may license their own works under terms they choose.
+
+Public site exports may include Cicada Studio-provided runtime and template materials such as `runtime.js` and generated HTML shell/widget markup. Those exported runtime/template materials are licensed under MIT when included in generated public site exports. See `LICENCE-OUTPUT.md`.

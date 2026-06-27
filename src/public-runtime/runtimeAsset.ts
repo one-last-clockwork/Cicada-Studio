@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Generated public-export copies of this runtime are available under the MIT terms in LICENCE-OUTPUT.md.
+
 export const PUBLIC_RUNTIME_JS = String.raw`
+/*! Cicada Studio public export runtime. See LICENCE-CICADA-RUNTIME.txt in this export. */
 (() => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
