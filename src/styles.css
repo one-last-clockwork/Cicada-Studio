@@ -789,9 +789,10 @@ p {
 
 .editor-grid {
   display: grid;
-  grid-template-columns: minmax(230px, 280px) minmax(420px, 1fr) minmax(320px, 0.82fr);
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto;
   gap: 14px;
-  min-height: calc(100vh - 130px);
+  min-height: 0;
 }
 
 .editor-side,
@@ -802,11 +803,20 @@ p {
   gap: 12px;
 }
 
+.editor-side {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+}
+
 .editor-main {
   padding: 16px;
   display: grid;
   grid-template-rows: minmax(420px, 1fr) auto;
   gap: 12px;
+}
+
+.editor-side h2 {
+  grid-column: 1 / -1;
 }
 
 .editor-side h2,
@@ -845,12 +855,70 @@ p {
   border-top: 1px solid var(--line);
 }
 
-.preview-pane iframe {
-  width: 100%;
-  min-height: 560px;
+.preview-resize-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.preview-size-field {
+  grid-template-columns: minmax(0, 1fr) minmax(78px, 96px) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.preview-size-field span {
+  min-width: 0;
+}
+
+.preview-size-field input {
+  padding: 7px 8px;
+}
+
+.icon-button {
+  width: 38px;
+  padding: 8px;
+}
+
+.preview-frame-scroll {
+  max-width: 100%;
+  overflow: auto;
+  padding: 2px 2px 10px;
+}
+
+.preview-frame-shell {
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: #ffffff;
+  box-shadow: 0 10px 24px rgba(31, 41, 38, 0.08);
+}
+
+.preview-frame-shell iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+}
+
+.preview-resize-handle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 30px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0;
+  cursor: nwse-resize;
+  color: var(--teal-dark);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 16px rgba(31, 41, 38, 0.16);
+  touch-action: none;
 }
 
 .check-row {
@@ -924,6 +992,99 @@ p {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+.theme-editor-grid .editor-main {
+  align-content: start;
+  grid-template-rows: auto;
+}
+
+.theme-select-item {
+  width: 100%;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.theme-select-item.active {
+  border-color: var(--teal);
+  background: var(--surface-green);
+  color: var(--teal-dark);
+}
+
+.theme-select-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code-editor-label {
+  min-height: 0;
+  height: auto;
+  grid-template-rows: auto auto;
+}
+
+.css-editor {
+  height: 560px;
+  min-height: 560px;
+  resize: vertical;
+}
+
+.theme-usage {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.theme-usage h3 {
+  margin: 0;
+}
+
+.theme-usage p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.theme-usage-list {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.theme-usage-list li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.theme-usage-list li:first-child {
+  border-top: 0;
+}
+
+.theme-usage-list span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--surface-green);
+  color: var(--teal);
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+
+.theme-usage-list strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
 .rule-grid {
   grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
 }
@@ -994,8 +1155,8 @@ p {
     min-height: 0;
   }
 
-  .preview-pane iframe {
-    min-height: 420px;
+  .preview-frame-scroll {
+    padding-bottom: 8px;
   }
 }
 
@@ -1059,6 +1220,14 @@ p {
 
   .workspace {
     padding: 14px;
+  }
+
+  .preview-resize-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-size-field {
+    grid-template-columns: minmax(0, 1fr) minmax(78px, 112px) auto;
   }
 
   .metric-row,

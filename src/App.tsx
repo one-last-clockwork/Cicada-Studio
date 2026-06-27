@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import {
   Archive,
@@ -18,10 +18,12 @@ import {
   Languages,
   LayoutDashboard,
   LockKeyhole,
+  Maximize2,
   MoveDown,
   MoveUp,
   Palette,
   Plus,
+  RotateCcw,
   Route,
   Save,
   Search,
@@ -37,6 +39,7 @@ import { importYachoProjectZip } from './features/import-yacho/importYacho';
 import { getPreviewHtml, getPreviewSandbox } from './features/preview/previewPolicy';
 import { buildPublicExportZip } from './lib/export-public/publicExport';
 import { checkPublicExportZip } from './lib/export-public/checkLeaks';
+import { escapeHtml, renderThemeDocument } from './lib/html/sanitize';
 import { createId, createPage, createProject, nowIso, touchProject } from './lib/projects/createProject';
 import { listProjects, saveProject } from './lib/db/projectsDb';
 import { normalizeAssetPath, normalizePublicPath, safeSlug } from './lib/path-safety/pathSafety';
@@ -58,6 +61,10 @@ import type {
 } from './types/project';
 
 const AUTOSAVE_DELAY_MS = 650;
+const PREVIEW_MIN_WIDTH = 240;
+const PREVIEW_MAX_WIDTH = 2400;
+const PREVIEW_MIN_HEIGHT = 240;
+const PREVIEW_MAX_HEIGHT = 2000;
 
 const I18nContext = createContext<UiText>(UI_TEXT.ja);
 
@@ -88,6 +95,169 @@ function parseList(value: string): string[] {
 
 function textareaList(values: string[]): string {
   return values.join('\n');
+}
+
+interface PreviewSize {
+  width: number;
+  height: number;
+}
+
+interface PreviewResizeDrag {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  width: number;
+  height: number;
+}
+
+function clampPreviewDimension(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.round(Math.min(Math.max(value, min), max));
+}
+
+function ResizablePreviewFrame(props: {
+  title: string;
+  srcDoc: string;
+  sandbox: string;
+  initialWidth: number;
+  initialHeight: number;
+}): JSX.Element {
+  const text = useUiText();
+  const initialSize = useMemo<PreviewSize>(
+    () => ({
+      width: clampPreviewDimension(props.initialWidth, PREVIEW_MIN_WIDTH, PREVIEW_MAX_WIDTH),
+      height: clampPreviewDimension(props.initialHeight, PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT)
+    }),
+    [props.initialHeight, props.initialWidth]
+  );
+  const [size, setSize] = useState<PreviewSize>(initialSize);
+  const [autoWidth, setAutoWidth] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<PreviewResizeDrag | null>(null);
+
+  function getAvailableWidth(): number {
+    return clampPreviewDimension((scrollRef.current?.clientWidth ?? props.initialWidth) - 4, PREVIEW_MIN_WIDTH, PREVIEW_MAX_WIDTH);
+  }
+
+  function clampPreviewWidth(value: number): number {
+    return clampPreviewDimension(value, PREVIEW_MIN_WIDTH, getAvailableWidth());
+  }
+
+  function updateSize(patch: Partial<PreviewSize>, options: { widthMode?: 'auto' | 'manual' } = {}): void {
+    if (patch.width !== undefined && options.widthMode !== 'auto') {
+      setAutoWidth(false);
+    }
+    setSize((current) => {
+      const width = patch.width === undefined ? current.width : clampPreviewWidth(patch.width);
+      const height = clampPreviewDimension(patch.height ?? current.height, PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT);
+      return current.width === width && current.height === height ? current : { width, height };
+    });
+  }
+
+  function resetSize(): void {
+    setAutoWidth(true);
+    setSize({
+      width: getAvailableWidth(),
+      height: initialSize.height
+    });
+  }
+
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const target = scrollRef.current;
+    const syncWidthToContainer = () => {
+      const availableWidth = clampPreviewDimension(target.clientWidth - 4, PREVIEW_MIN_WIDTH, PREVIEW_MAX_WIDTH);
+      setSize((current) => {
+        const width = autoWidth || current.width > availableWidth ? availableWidth : current.width;
+        return current.width === width ? current : { ...current, width };
+      });
+    };
+    syncWidthToContainer();
+
+    const observer = new ResizeObserver(syncWidthToContainer);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [autoWidth, props.initialWidth]);
+
+  function startResize(event: PointerEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    setAutoWidth(false);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      width: size.width,
+      height: size.height
+    };
+  }
+
+  function moveResize(event: PointerEvent<HTMLButtonElement>): void {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    updateSize({
+      width: drag.width + event.clientX - drag.startX,
+      height: drag.height + event.clientY - drag.startY
+    });
+  }
+
+  function endResize(event: PointerEvent<HTMLButtonElement>): void {
+    if (dragRef.current?.pointerId === event.pointerId && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragRef.current = null;
+  }
+
+  return (
+    <>
+      <div className="preview-resize-controls">
+        <label className="preview-size-field">
+          <span>{text.previewWidth}</span>
+          <input
+            aria-label={text.previewWidth}
+            type="number"
+            min={PREVIEW_MIN_WIDTH}
+            max={PREVIEW_MAX_WIDTH}
+            value={size.width}
+            onChange={(event) => updateSize({ width: Number(event.target.value) })}
+          />
+          <span>px</span>
+        </label>
+        <label className="preview-size-field">
+          <span>{text.previewHeight}</span>
+          <input
+            aria-label={text.previewHeight}
+            type="number"
+            min={PREVIEW_MIN_HEIGHT}
+            max={PREVIEW_MAX_HEIGHT}
+            value={size.height}
+            onChange={(event) => updateSize({ height: Number(event.target.value) })}
+          />
+          <span>px</span>
+        </label>
+        <button type="button" className="icon-button" title={text.resetPreviewSize} aria-label={text.resetPreviewSize} onClick={resetSize}>
+          <RotateCcw size={16} />
+        </button>
+      </div>
+      <div ref={scrollRef} className="preview-frame-scroll">
+        <div className="preview-frame-shell" style={{ width: `${size.width}px`, height: `${size.height}px` }}>
+          <iframe title={props.title} sandbox={props.sandbox} srcDoc={props.srcDoc} />
+          <button
+            type="button"
+            className="preview-resize-handle"
+            title={text.resizePreview}
+            aria-label={text.resizePreview}
+            onPointerDown={startResize}
+            onPointerMove={moveResize}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+          >
+            <Maximize2 size={15} />
+          </button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 export default function App(): JSX.Element {
@@ -296,13 +466,14 @@ export default function App(): JSX.Element {
     updateProject((current) => ({ ...current, assets: [...current.assets, ...assets] }));
   }
 
-  function addTheme(): void {
+  function addTheme(): StudioTheme {
     const theme: StudioTheme = {
       id: createId('theme'),
       name: text.themeName(project.themes.length + 1),
       css: 'body { background: #fffdf8; color: #24272d; }'
     };
     updateProject((current) => ({ ...current, themes: [...current.themes, theme] }));
+    return theme;
   }
 
   function updateTheme(themeId: string, patch: Partial<StudioTheme>): void {
@@ -1038,10 +1209,12 @@ function EditorPanel(props: {
 
       <aside className="preview-pane">
         <h3>{text.safePreview}</h3>
-        <iframe
+        <ResizablePreviewFrame
           title={text.pagePreview}
           sandbox={getPreviewSandbox(props.project, props.page)}
           srcDoc={getPreviewHtml(props.project, props.page)}
+          initialWidth={420}
+          initialHeight={560}
         />
       </aside>
     </section>
@@ -1156,37 +1329,138 @@ function AssetsPanel(props: {
 
 function ThemesPanel(props: {
   project: StudioProject;
-  addTheme: () => void;
+  addTheme: () => StudioTheme;
   updateTheme: (themeId: string, patch: Partial<StudioTheme>) => void;
   updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
 }): JSX.Element {
   const text = useUiText();
+  const [selectedThemeId, setSelectedThemeId] = useState(props.project.themes[0]?.id ?? '');
+  const selectedTheme = useMemo(
+    () => props.project.themes.find((theme) => theme.id === selectedThemeId) ?? props.project.themes[0],
+    [props.project.themes, selectedThemeId]
+  );
+  const defaultThemeId = props.project.themes[0]?.id;
+  const themePages = useMemo(() => {
+    if (!selectedTheme) return [];
+    return props.project.pages.filter((page) => page.themeId === selectedTheme.id || (!page.themeId && selectedTheme.id === defaultThemeId));
+  }, [defaultThemeId, props.project.pages, selectedTheme]);
+
+  useEffect(() => {
+    if (!selectedTheme && props.project.themes[0]) {
+      setSelectedThemeId(props.project.themes[0].id);
+    }
+  }, [props.project.themes, selectedTheme]);
+
+  function handleAddTheme(): void {
+    const theme = props.addTheme();
+    setSelectedThemeId(theme.id);
+  }
+
+  if (!selectedTheme) {
+    return (
+      <section className="panel">
+        <div className="section-head">
+          <h2>{text.cssThemes}</h2>
+          <button type="button" onClick={handleAddTheme}>
+            <Plus size={16} /> {text.addTheme}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <section className="panel">
-      <div className="section-head">
+    <section className="editor-grid theme-editor-grid">
+      <aside className="editor-side">
         <h2>{text.cssThemes}</h2>
-        <button type="button" onClick={props.addTheme}>
+        <label>
+          {text.themeSelector}
+          <select value={selectedTheme.id} onChange={(event) => setSelectedThemeId(event.target.value)}>
+            {props.project.themes.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {text.themeNameLabel}
+          <input value={selectedTheme.name} onChange={(event) => props.updateTheme(selectedTheme.id, { name: event.target.value })} />
+        </label>
+        <button type="button" onClick={handleAddTheme}>
           <Plus size={16} /> {text.addTheme}
         </button>
-      </div>
-      <div className="theme-grid">
         {props.project.themes.map((theme) => (
-          <article key={theme.id} className="theme-editor">
-            <input value={theme.name} onChange={(event) => props.updateTheme(theme.id, { name: event.target.value })} />
-            <textarea value={theme.css} onChange={(event) => props.updateTheme(theme.id, { css: event.target.value })} />
-          </article>
+          <button
+            key={theme.id}
+            type="button"
+            className={`theme-select-item${theme.id === selectedTheme.id ? ' active' : ''}`}
+            onClick={() => setSelectedThemeId(theme.id)}
+          >
+            <Palette size={16} />
+            <span>{theme.name}</span>
+          </button>
         ))}
-      </div>
-      <label className="check-row wide">
-        <input
-          type="checkbox"
-          checked={props.project.scriptPreviewEnabled}
-          onChange={(event) => props.updateProject((current) => ({ ...current, scriptPreviewEnabled: event.target.checked }))}
-        />
-        {text.enableAdvancedScriptPreview}
-      </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={props.project.scriptPreviewEnabled}
+            onChange={(event) => props.updateProject((current) => ({ ...current, scriptPreviewEnabled: event.target.checked }))}
+          />
+          {text.enableAdvancedScriptPreview}
+        </label>
+      </aside>
+
+      <section className="editor-main">
+        <label className="code-editor-label">
+          {text.themeCssCode}
+          <textarea
+            className="html-editor css-editor"
+            value={selectedTheme.css}
+            aria-label={text.themeCssCode}
+            spellCheck={false}
+            onChange={(event) => props.updateTheme(selectedTheme.id, { css: event.target.value })}
+          />
+        </label>
+      </section>
+
+      <aside className="preview-pane theme-preview-pane">
+        <h3>{text.themePreview}</h3>
+        <ResizablePreviewFrame title={text.themePreview} sandbox="" srcDoc={getThemePreviewHtml(selectedTheme, text)} initialWidth={420} initialHeight={390} />
+        <section className="theme-usage">
+          <h3>{text.themeUsage}</h3>
+          {themePages.length ? (
+            <ul className="theme-usage-list">
+              {themePages.map((page) => (
+                <li key={page.id}>
+                  <span>{page.pageNumber}</span>
+                  <strong>{page.title}</strong>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>{text.noThemeUsage}</p>
+          )}
+        </section>
+      </aside>
     </section>
   );
+}
+
+function getThemePreviewHtml(theme: StudioTheme, text: UiText): string {
+  const body = `<main>
+  <h1>${escapeHtml(text.themePreviewTitle)}</h1>
+  <p>${escapeHtml(text.themePreviewLead)}</p>
+  <section class="arg-widget">
+    <form>
+      <label>${escapeHtml(text.themePreviewPrompt)} <input autocomplete="off" value="${escapeHtml(text.themePreviewInput)}"></label>
+      <button type="button">${escapeHtml(text.themePreviewButton)}</button>
+    </form>
+    <div aria-live="polite">${escapeHtml(text.themePreviewResult)}</div>
+  </section>
+  <p><a href="#">${escapeHtml(text.themePreviewLink)}</a></p>
+</main>`;
+  return renderThemeDocument(theme.name, body, theme.css);
 }
 
 function FlowchartPanel(props: {
