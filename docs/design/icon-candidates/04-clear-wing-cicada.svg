@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Cicada Studio icon candidate 4: Clear Wing Cicada</title>
+  <desc id="desc">A more literal cicada with wide transparent wings, visible legs, large eyes, and segmented body.</desc>
+  <rect width="512" height="512" rx="112" fill="#f8faf7"/>
+  <circle cx="256" cy="256" r="198" fill="#eef8f5"/>
+  <path d="M238 178C189 111 96 119 68 202c-24 73 28 149 111 161 42 6 77-8 94-35-37-47-47-99-35-150Z" fill="#ffffff" stroke="#006c66" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M274 178c49-67 142-59 170 24 24 73-28 149-111 161-42 6-77-8-94-35 37-47 47-99 35-150Z" fill="#ffffff" stroke="#006c66" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M104 221c42 16 81 37 116 64M408 221c-42 16-81 37-116 64M128 313c34-12 66-17 100-17M384 313c-34-12-66-17-100-17" fill="none" stroke="#c8d0c8" stroke-width="10" stroke-linecap="round"/>
+  <path d="M159 181c-32-35-47-66-45-96M353 181c32-35 47-66 45-96" fill="none" stroke="#1f2926" stroke-width="14" stroke-linecap="round"/>
+  <path d="M188 266 111 221M188 307 98 320M200 347l-66 56M324 266l77-45M324 307l90 13M312 347l66 56" fill="none" stroke="#1f2926" stroke-width="18" stroke-linecap="round"/>
+  <path d="M256 118c-57 0-93 54-93 138 0 91 38 151 93 151s93-60 93-151c0-84-36-138-93-138Z" fill="#1f2926"/>
+  <path d="M214 155c7-23 24-39 42-39s35 16 42 39c-11 13-25 20-42 20s-31-7-42-20Z" fill="#006c66"/>
+  <circle cx="206" cy="161" r="25" fill="#b57920" stroke="#fff3dc" stroke-width="9"/>
+  <circle cx="306" cy="161" r="25" fill="#b57920" stroke="#fff3dc" stroke-width="9"/>
+  <path d="M215 223h82M205 272h102M211 322h90M228 368h56" stroke="#fff3dc" stroke-width="17" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Cicada Studio icon candidate 1: Signal Shell</title>
+  <desc id="desc">A bold cicada mark with signal arcs, designed for small favicon sizes.</desc>
+  <rect width="512" height="512" rx="112" fill="#1f2926"/>
+  <circle cx="256" cy="256" r="180" fill="#006c66"/>
+  <path d="M177 183c-41 38-53 101-26 154 23 45 68 73 111 72-24-42-39-90-43-139-3-39 4-68 19-94-23-11-44-9-61 7Z" fill="#eaf6ee"/>
+  <path d="M335 183c41 38 53 101 26 154-23 45-68 73-111 72 24-42 39-90 43-139 3-39-4-68-19-94 23-11 44-9 61 7Z" fill="#eaf6ee"/>
+  <path d="M256 123c-35 24-55 76-55 143 0 72 22 126 55 154 33-28 55-82 55-154 0-67-20-119-55-143Z" fill="#ffffff"/>
+  <path d="M256 133c-24 28-37 75-37 133 0 60 14 107 37 137 23-30 37-77 37-137 0-58-13-105-37-133Z" fill="#006c66"/>
+  <path d="M229 183h54M220 230h72M220 278h72M229 326h54" stroke="#ffffff" stroke-width="15" stroke-linecap="round"/>
+  <circle cx="228" cy="152" r="15" fill="#fff3dc"/>
+  <circle cx="284" cy="152" r="15" fill="#fff3dc"/>
+  <path d="M160 130c-28 16-50 40-65 69M352 130c28 16 50 40 65 69" fill="none" stroke="#b57920" stroke-width="20" stroke-linecap="round"/>
+  <path d="M130 365c-24-23-40-53-47-86M382 365c24-23 40-53 47-86" fill="none" stroke="#b57920" stroke-width="20" stroke-linecap="round"/>
+</svg>

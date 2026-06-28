@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Cicada Studio icon candidate 6: Molting Shell</title>
+  <desc id="desc">A cicada shell silhouette with strong wing outline and claw-like legs for immediate insect recognition.</desc>
+  <rect width="512" height="512" rx="112" fill="#fff3dc"/>
+  <circle cx="256" cy="256" r="188" fill="#1f2926"/>
+  <path d="M237 180C195 111 105 118 77 194c-28 78 26 158 115 171 35 5 64-4 82-27-34-48-47-103-37-158Z" fill="#eaf6ee" stroke="#b57920" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M275 180c42-69 132-62 160 14 28 78-26 158-115 171-35 5-64-4-82-27 34-48 47-103 37-158Z" fill="#eaf6ee" stroke="#b57920" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M253 121c-50 0-83 52-83 132 0 91 35 154 86 154s86-63 86-154c0-80-33-132-83-132h-6Z" fill="#006c66"/>
+  <path d="M205 162c9-29 28-47 51-47s42 18 51 47c-12 14-30 23-51 23s-39-9-51-23Z" fill="#1f2926"/>
+  <circle cx="212" cy="162" r="23" fill="#fff3dc"/>
+  <circle cx="300" cy="162" r="23" fill="#fff3dc"/>
+  <circle cx="212" cy="162" r="10" fill="#a64737"/>
+  <circle cx="300" cy="162" r="10" fill="#a64737"/>
+  <path d="M139 134c34 19 64 47 89 84M373 134c-34 19-64 47-89 84" fill="none" stroke="#b57920" stroke-width="15" stroke-linecap="round"/>
+  <path d="M187 254 91 214M184 302 84 316M199 348l-71 59M325 254l96-40M328 302l100 14M313 348l71 59" fill="none" stroke="#fff3dc" stroke-width="18" stroke-linecap="round"/>
+  <path d="M222 226h68M212 276h88M222 326h68M238 371h36" stroke="#fff3dc" stroke-width="16" stroke-linecap="round"/>
+</svg>

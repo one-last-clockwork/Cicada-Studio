@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Cicada Studio icon candidate 5: Brood Mark</title>
+  <desc id="desc">A strong cicada emblem with amber wings, red eyes, antennae, and six readable legs.</desc>
+  <rect width="512" height="512" rx="112" fill="#1f2926"/>
+  <path d="M83 278c0-102 74-185 173-185s173 83 173 185c0 84-55 146-126 164H209C138 424 83 362 83 278Z" fill="#006c66"/>
+  <path d="M240 171c-52-67-139-54-166 18-30 79 26 163 120 174 33 4 62-4 82-22-35-53-48-111-36-170Z" fill="#fff3dc" stroke="#ffffff" stroke-width="17" stroke-linejoin="round"/>
+  <path d="M272 171c52-67 139-54 166 18 30 79-26 163-120 174-33 4-62-4-82-22 35-53 48-111 36-170Z" fill="#fff3dc" stroke="#ffffff" stroke-width="17" stroke-linejoin="round"/>
+  <path d="M122 213c38 19 75 43 109 73M390 213c-38 19-75 43-109 73M143 316c29-10 60-14 92-12M369 316c-29-10-60-14-92-12" fill="none" stroke="#b57920" stroke-width="10" stroke-linecap="round"/>
+  <path d="M154 177c-23-31-34-59-31-88M358 177c23-31 34-59 31-88" fill="none" stroke="#fff3dc" stroke-width="14" stroke-linecap="round"/>
+  <path d="M193 263 104 231M188 306l-95 6M203 350l-66 54M319 263l89-32M324 306l95 6M309 350l66 54" fill="none" stroke="#fff3dc" stroke-width="17" stroke-linecap="round"/>
+  <path d="M256 119c-51 28-82 82-82 144 0 83 34 147 82 170 48-23 82-87 82-170 0-62-31-116-82-144Z" fill="#f8faf7"/>
+  <path d="M256 139c-33 29-53 75-53 125 0 67 22 121 53 148 31-27 53-81 53-148 0-50-20-96-53-125Z" fill="#1f2926"/>
+  <circle cx="214" cy="154" r="27" fill="#a64737" stroke="#fff3dc" stroke-width="8"/>
+  <circle cx="298" cy="154" r="27" fill="#a64737" stroke="#fff3dc" stroke-width="8"/>
+  <path d="M222 224h68M215 274h82M222 323h68M236 368h40" stroke="#fff3dc" stroke-width="15" stroke-linecap="round"/>
+</svg>

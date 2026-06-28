@@ -232,12 +232,17 @@ p {
 .brand-mark {
   width: 42px;
   height: 42px;
-  border: 1px solid rgba(0, 108, 102, 0.28);
   border-radius: 8px;
   display: grid;
   place-items: center;
-  color: var(--teal);
+  overflow: hidden;
   background: var(--surface-green);
+}
+
+.brand-mark img {
+  width: 42px;
+  height: 42px;
+  display: block;
 }
 
 .brand-lockup strong {

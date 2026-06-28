@@ -932,7 +932,7 @@ function Sidebar({
     <aside className="app-sidebar">
       <div className="brand-lockup">
         <div className="brand-mark">
-          <KeyRound size={24} />
+          <img src="/favicon.svg" alt="" aria-hidden="true" />
         </div>
         <div>
           <strong>Cicada Studio</strong>

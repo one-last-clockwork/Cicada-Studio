@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Cicada Studio icon candidate 2: Wing Cipher</title>
+  <desc id="desc">A geometric cicada mark with cipher-like wing cells and clue dots.</desc>
+  <rect width="512" height="512" rx="112" fill="#f8faf7"/>
+  <circle cx="256" cy="256" r="192" fill="#eef8f5"/>
+  <path d="M256 106 133 231c-30 31-26 82 9 108l83 62c18 13 44 0 44-23V128c0-20-21-31-35-22Z" fill="#ffffff" stroke="#006c66" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M256 106 379 231c30 31 26 82-9 108l-83 62c-18 13-44 0-44-23V128c0-20 21-31 35-22Z" fill="#ffffff" stroke="#006c66" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M161 241h190M181 307h150M217 373h78" stroke="#c8d0c8" stroke-width="15" stroke-linecap="round"/>
+  <path d="M256 126c-35 26-57 80-57 143 0 76 24 131 57 157 33-26 57-81 57-157 0-63-22-117-57-143Z" fill="#1f2926"/>
+  <path d="M232 201h48M224 254h64M224 307h64M235 360h42" stroke="#fff3dc" stroke-width="15" stroke-linecap="round"/>
+  <circle cx="221" cy="145" r="16" fill="#b57920"/>
+  <circle cx="291" cy="145" r="16" fill="#b57920"/>
+  <circle cx="146" cy="213" r="12" fill="#386c9f"/>
+  <circle cx="366" cy="213" r="12" fill="#386c9f"/>
+  <circle cx="169" cy="349" r="10" fill="#386c9f"/>
+  <circle cx="343" cy="349" r="10" fill="#386c9f"/>
+</svg>

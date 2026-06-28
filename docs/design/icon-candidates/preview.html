@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cicada Studio Icon Candidates</title>
+    <style>
+      :root {
+        font-family: Inter, "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+        color: #1f2926;
+        background: #f3f5f2;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+      }
+
+      main {
+        max-width: 1160px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0 0 24px;
+        color: #69736f;
+        line-height: 1.6;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      article {
+        border: 1px solid #d9ded8;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 18px;
+      }
+
+      h2 {
+        margin: 0 0 14px;
+        font-size: 18px;
+      }
+
+      .hero {
+        display: grid;
+        place-items: center;
+        min-height: 220px;
+        border-radius: 8px;
+        background:
+          linear-gradient(45deg, #f8faf7 25%, transparent 25%),
+          linear-gradient(-45deg, #f8faf7 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #f8faf7 75%),
+          linear-gradient(-45deg, transparent 75%, #f8faf7 75%);
+        background-color: #eef0eb;
+        background-position:
+          0 0,
+          0 12px,
+          12px -12px,
+          -12px 0;
+        background-size: 24px 24px;
+      }
+
+      .hero img {
+        width: 160px;
+        height: 160px;
+      }
+
+      .sizes {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-top: 16px;
+      }
+
+      .sizes span {
+        display: grid;
+        gap: 6px;
+        color: #69736f;
+        font-size: 12px;
+      }
+
+      .sizes img {
+        width: var(--size);
+        height: var(--size);
+      }
+
+      .note {
+        margin-top: 10px;
+        font-size: 13px;
+      }
+
+      @media (max-width: 860px) {
+        body {
+          padding: 16px;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cicada Studio icon candidates</h1>
+      <p>Compare the mark at app-icon scale and favicon sizes. 04-06 are more literal cicada directions with clearer wings, eyes, antennae, and legs. These are SVG candidates only; the app favicon has not been changed yet.</p>
+      <section class="grid">
+        <article>
+          <h2>01 Signal Shell</h2>
+          <div class="hero"><img src="./01-signal-shell.svg" alt="Signal Shell icon candidate" /></div>
+          <div class="sizes">
+            <span><img style="--size: 64px" src="./01-signal-shell.svg" alt="" />64</span>
+            <span><img style="--size: 32px" src="./01-signal-shell.svg" alt="" />32</span>
+            <span><img style="--size: 16px" src="./01-signal-shell.svg" alt="" />16</span>
+          </div>
+          <p class="note">Abstract signal mark. Strongest at 16px, weakest as a literal cicada.</p>
+        </article>
+        <article>
+          <h2>02 Wing Cipher</h2>
+          <div class="hero"><img src="./02-wing-cipher.svg" alt="Wing Cipher icon candidate" /></div>
+          <div class="sizes">
+            <span><img style="--size: 64px" src="./02-wing-cipher.svg" alt="" />64</span>
+            <span><img style="--size: 32px" src="./02-wing-cipher.svg" alt="" />32</span>
+            <span><img style="--size: 16px" src="./02-wing-cipher.svg" alt="" />16</span>
+          </div>
+          <p class="note">Cipher/geometric mark. More ARG-like than insect-like.</p>
+        </article>
+        <article>
+          <h2>03 Night Song</h2>
+          <div class="hero"><img src="./03-night-song.svg" alt="Night Song icon candidate" /></div>
+          <div class="sizes">
+            <span><img style="--size: 64px" src="./03-night-song.svg" alt="" />64</span>
+            <span><img style="--size: 32px" src="./03-night-song.svg" alt="" />32</span>
+            <span><img style="--size: 16px" src="./03-night-song.svg" alt="" />16</span>
+          </div>
+          <p class="note">Nocturnal sound mark. Moodier, but still fairly abstract.</p>
+        </article>
+        <article>
+          <h2>04 Clear Wing Cicada</h2>
+          <div class="hero"><img src="./04-clear-wing-cicada.svg" alt="Clear Wing Cicada icon candidate" /></div>
+          <div class="sizes">
+            <span><img style="--size: 64px" src="./04-clear-wing-cicada.svg" alt="" />64</span>
+            <span><img style="--size: 32px" src="./04-clear-wing-cicada.svg" alt="" />32</span>
+            <span><img style="--size: 16px" src="./04-clear-wing-cicada.svg" alt="" />16</span>
+          </div>
+          <p class="note">Most literal. Wide wings, big eyes, antennae, and six legs read as cicada quickly.</p>
+        </article>
+        <article>
+          <h2>05 Brood Mark</h2>
+          <div class="hero"><img src="./05-brood-mark.svg" alt="Brood Mark icon candidate" /></div>
+          <div class="sizes">
+            <span><img style="--size: 64px" src="./05-brood-mark.svg" alt="" />64</span>
+            <span><img style="--size: 32px" src="./05-brood-mark.svg" alt="" />32</span>
+            <span><img style="--size: 16px" src="./05-brood-mark.svg" alt="" />16</span>
+          </div>
+          <p class="note">Badge-like and high contrast. Cicada silhouette stays bold for favicon use.</p>
+        </article>
+        <article>
+          <h2>06 Molting Shell</h2>
+          <div class="hero"><img src="./06-molting-shell.svg" alt="Molting Shell icon candidate" /></div>
+          <div class="sizes">
+            <span><img style="--size: 64px" src="./06-molting-shell.svg" alt="" />64</span>
+            <span><img style="--size: 32px" src="./06-molting-shell.svg" alt="" />32</span>
+            <span><img style="--size: 16px" src="./06-molting-shell.svg" alt="" />16</span>
+          </div>
+          <p class="note">Shell/exuvia feel. Strong insect outline with a slightly ARG-horror edge.</p>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
