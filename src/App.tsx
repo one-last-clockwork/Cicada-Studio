@@ -46,7 +46,7 @@ import { buildPublicExportZip } from './lib/export-public/publicExport';
 import { checkPublicExportZip } from './lib/export-public/checkLeaks';
 import { escapeHtml, renderThemeDocument } from './lib/html/sanitize';
 import { createDefaultSite, createId, createPage, createProject, nowIso, touchProject } from './lib/projects/createProject';
-import { allPageRefs, allPages, findPageRef, primarySite, siteById, updatePageInProject, updateSite, updateThemeInProject } from './lib/projects/projectAccess';
+import { allPageRefs, allPages, primarySite, siteById, updatePageInProject, updateSite, updateThemeInProject } from './lib/projects/projectAccess';
 import { deleteProject as deleteStoredProject, listProjects, saveProject } from './lib/db/projectsDb';
 import { normalizeAssetPath, normalizePublicPath, safeSlug } from './lib/path-safety/pathSafety';
 import { downloadBlob } from './lib/zip/blob';
