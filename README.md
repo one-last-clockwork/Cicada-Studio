@@ -58,6 +58,19 @@ References:
 - https://developers.cloudflare.com/pages/get-started/direct-upload/
 - https://developers.cloudflare.com/workers/static-assets/
 
+## Contributing
+
+Cicada Studio accepts external contributions under the contribution policy documented in `CONTRIBUTING.md`.
+
+The project is designed to support AGPL community releases and future commercial, hosted, cloud, proprietary, or closed source editions. Code, documentation, design assets, tests, and other copyrightable contributions require agreement to the Cicada Studio Contributor License Agreement before merge.
+
+See:
+
+- `CONTRIBUTING.md`
+- `docs/legal/CLA-POLICY.md`
+- `docs/legal/CONTRIBUTOR-LICENSE-AGREEMENT.md`
+- `docs/legal/LICENSE-BOUNDARIES.md`
+
 ## Security Model
 
 Preview is safe by default: scripts are stripped and the iframe sandbox does not use `allow-same-origin`. Script preview requires both project-level and page-level opt-in, and still uses a sandboxed iframe without a parent API.
@@ -70,6 +83,6 @@ Imported YACHO project scripts are never auto-enabled.
 
 Cicada Studio itself is licensed under AGPL-3.0-or-later. See `LICENSE`.
 
-User-created project data, stories, page content, assets, and published site content are not licensed under AGPL merely because they were created, edited, exported, or deployed with Cicada Studio. Users may license their own works under terms they choose.
+User-created project data, stories, page content, assets, and published site content are not licensed under AGPL merely because they were created, edited, exported, or deployed with Cicada Studio. Users can license their own works under terms they choose.
 
-Public site exports may include Cicada Studio-provided runtime and template materials such as `runtime.js` and generated HTML shell/widget markup. Those exported runtime/template materials are licensed under MIT when included in generated public site exports. See `LICENCE-OUTPUT.md`.
+Public site exports can include Cicada Studio-provided runtime and template materials such as `runtime.js` and generated HTML shell/widget markup. Those exported runtime/template materials are licensed under MIT when included in generated public site exports. See `LICENCE-OUTPUT.md`.

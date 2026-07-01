@@ -1730,6 +1730,215 @@ p {
   gap: 10px;
 }
 
+.source-zip-warning,
+.source-import-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  margin: 0;
+  border: 1px solid rgba(190, 107, 0, 0.24);
+  border-radius: 7px;
+  background: #fff7e8;
+  color: #5f3600;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.source-zip-warning svg,
+.source-import-status svg {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.source-import-backdrop {
+  place-items: center;
+}
+
+.source-import-dialog {
+  width: min(880px, 100%);
+  max-height: min(86vh, 860px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 24px 80px rgba(31, 41, 38, 0.26);
+  overflow: hidden;
+}
+
+.source-import-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--line);
+  padding: 18px 20px;
+}
+
+.source-import-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.2rem;
+  line-height: 1.25;
+}
+
+.source-import-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.source-import-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.source-import-icon.ok {
+  background: var(--surface-green);
+  color: var(--green);
+}
+
+.source-import-icon.error {
+  background: #fff0ef;
+  color: var(--danger);
+}
+
+.source-import-body {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px 18px;
+}
+
+.source-import-issues {
+  display: grid;
+  gap: 10px;
+}
+
+.source-import-status.ok {
+  border-color: rgba(0, 108, 102, 0.24);
+  background: #edf8f5;
+  color: var(--green);
+}
+
+.source-import-status.error {
+  border-color: rgba(155, 37, 35, 0.25);
+  background: #fff0ef;
+  color: var(--danger);
+}
+
+.source-import-modes {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.source-import-modes legend,
+.source-issue-group > strong {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.mode-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  padding: 11px;
+}
+
+.mode-option.selected {
+  border-color: rgba(0, 108, 102, 0.38);
+  background: #edf8f5;
+}
+
+.mode-option input {
+  margin-top: 3px;
+}
+
+.mode-option span,
+.mode-option small {
+  display: block;
+}
+
+.mode-option small {
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.source-issue-group {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  padding: 12px;
+}
+
+.source-issue-group.error {
+  border-color: rgba(155, 37, 35, 0.24);
+  background: #fff7f6;
+}
+
+.source-issue-group.warning {
+  border-color: rgba(190, 107, 0, 0.2);
+  background: #fffaf0;
+}
+
+.source-issue-group.repair {
+  border-color: rgba(56, 108, 159, 0.24);
+  background: #f1f6ff;
+}
+
+.source-issue-group p,
+.source-issue-group ul {
+  margin: 0;
+}
+
+.source-issue-group ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.source-issue-group li {
+  line-height: 1.5;
+}
+
+.source-issue-group code {
+  display: inline-block;
+  margin: 0 6px 2px 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  padding: 1px 5px;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.source-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: 14px 20px;
+}
+
 @media (max-width: 1240px) {
   .app-shell {
     grid-template-columns: 224px minmax(0, 1fr);
@@ -1770,6 +1979,25 @@ p {
 
   .preview-frame-scroll {
     padding-bottom: 8px;
+  }
+
+  .source-import-dialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .source-import-head,
+  .source-import-body,
+  .source-import-actions {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .source-import-actions {
+    justify-content: stretch;
+  }
+
+  .source-import-actions button {
+    flex: 1 1 220px;
   }
 }
 

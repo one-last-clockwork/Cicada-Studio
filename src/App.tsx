@@ -37,6 +37,8 @@ import {
 import { type StudioTab } from './app/routes';
 import { isLanguage, LANGUAGE_STORAGE_KEY, UI_TEXT, type Language, type UiText } from './app/i18n';
 import { exportProjectBackupZip, importProjectBackupZip } from './features/backup/backupZip';
+import { dryRunImportProjectSourceZip, exportProjectSourceZip } from './features/backup/sourceZip';
+import type { SourceZipDryRunResult, SourceZipIssue } from './features/backup/sourceZipTypes';
 import { importYachoProjectZip } from './features/import-yacho/importYacho';
 import { getPreviewHtml, getPreviewSandbox } from './features/preview/previewPolicy';
 import { buildPublicExportZip } from './lib/export-public/publicExport';
@@ -77,6 +79,14 @@ interface ConfirmationRequest {
   tone?: 'default' | 'danger';
 }
 
+type SourceImportMode = 'new' | 'overwrite';
+
+interface SourceImportReview {
+  fileName: string;
+  result: SourceZipDryRunResult;
+  mode: SourceImportMode;
+}
+
 const I18nContext = createContext<UiText>(UI_TEXT.ja);
 
 function useUiText(): UiText {
@@ -98,6 +108,30 @@ function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
 
 function cloneProjectForSnapshot(project: StudioProject): StudioProject {
   return { ...project, snapshots: [] };
+}
+
+function uniquePageSlug(base: string, pages: StudioPage[], fallback: string): string {
+  const used = new Set(pages.map((page) => page.slug));
+  const normalized = safeSlug(base, fallback);
+  let candidate = normalized;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${normalized}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function uniquePagePath(base: string, pages: StudioPage[], fallback: string): string {
+  const used = new Set(pages.map((page) => page.path));
+  const normalized = normalizePublicPath(base, fallback);
+  let candidate = normalized;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = normalized.replace(/\.html$/i, `-${suffix}.html`);
+    suffix += 1;
+  }
+  return candidate;
 }
 
 function parseList(value: string): string[] {
@@ -284,6 +318,7 @@ export default function App(): JSX.Element {
   const [loadState, setLoadState] = useState<string>(UI_TEXT.ja.loading);
   const [saveState, setSaveState] = useState<string>(UI_TEXT.ja.notSaved);
   const [exportState, setExportState] = useState<string>('');
+  const [sourceImportReview, setSourceImportReview] = useState<SourceImportReview | null>(null);
   const [projectsChangedSinceBackup, setProjectsChangedSinceBackup] = useState<Record<string, boolean>>({});
   const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null);
   const firstSave = useRef(true);
@@ -458,10 +493,11 @@ export default function App(): JSX.Element {
   }
 
   function addPage(): void {
+    const slug = uniquePageSlug(`page-${project.pages.length + 1}`, project.pages, `page-${project.pages.length + 1}`);
     const page = createPage({
       title: text.newPageTitle(project.pages.length + 1),
-      slug: `page-${project.pages.length + 1}`,
-      path: `page-${project.pages.length + 1}.html`,
+      slug,
+      path: uniquePagePath(`${slug}.html`, project.pages, `${slug}.html`),
       pageNumber: project.pages.length + 1,
       themeId: project.themes[0]?.id
     });
@@ -479,12 +515,13 @@ export default function App(): JSX.Element {
     if (!confirmed) {
       return;
     }
+    const slug = uniquePageSlug(`${page.slug}-copy`, project.pages, 'copy');
     const copy = {
       ...page,
       id: createId('page'),
       title: `${page.title} ${text.duplicateSuffix}`,
-      slug: `${page.slug}-copy`,
-      path: normalizePublicPath(`${page.slug}-copy.html`, 'copy.html'),
+      slug,
+      path: uniquePagePath(`${slug}.html`, project.pages, 'copy.html'),
       pageNumber: project.pages.length + 1
     };
     updateProject((current) => ({ ...current, pages: [...current.pages, copy] }));
@@ -514,7 +551,11 @@ export default function App(): JSX.Element {
         ...current,
         pages,
         searchRules: current.searchRules.filter((rule) => rule.targetPageId !== pageId),
-        conditions: current.conditions.filter((condition) => condition.sourcePageId !== pageId && condition.targetPageId !== pageId)
+        conditions: current.conditions.filter((condition) => condition.sourcePageId !== pageId && condition.targetPageId !== pageId),
+        flowcharts: current.flowcharts.map((flowchart) => ({
+          ...flowchart,
+          nodes: flowchart.nodes.map((node) => (node.pageId === pageId ? { ...node, pageId: undefined } : node))
+        }))
       };
     });
     setSelectedPageId(project.pages.find((page) => page.id !== pageId)?.id ?? '');
@@ -709,6 +750,12 @@ export default function App(): JSX.Element {
     clearProjectChangedSinceBackup(project.id);
   }
 
+  async function exportSourceBackup(): Promise<void> {
+    const blob = await exportProjectSourceZip(project);
+    downloadBlob(blob, `${safeSlug(project.name, 'cicada-project')}-source.zip`);
+    clearProjectChangedSinceBackup(project.id);
+  }
+
   async function importBackup(file: File | undefined): Promise<void> {
     if (!file) return;
     const imported = await importProjectBackupZip(await readFileAsArrayBuffer(file));
@@ -717,6 +764,72 @@ export default function App(): JSX.Element {
     clearProjectChangedSinceBackup(imported.id);
     setSelectedPageId(imported.pages[0]?.id ?? '');
     setExportState(text.importedBackup(file.name));
+  }
+
+  async function dryRunImportSource(file: File | undefined): Promise<void> {
+    if (!file) return;
+    try {
+      const result = await dryRunImportProjectSourceZip(await readFileAsArrayBuffer(file));
+      setSourceImportReview({ fileName: file.name, result, mode: 'new' });
+      setExportState(result.ok ? text.sourceImportReady(file.name) : text.sourceImportHasErrors(file.name, result.errors.length));
+    } catch (error: unknown) {
+      setSourceImportReview(null);
+      setExportState(error instanceof Error ? text.sourceImportDryRunFailed(error.message) : text.sourceImportDryRunFailed(text.genericError));
+    }
+  }
+
+  function updateSourceImportMode(mode: SourceImportMode): void {
+    setSourceImportReview((review) => (review ? { ...review, mode } : review));
+  }
+
+  function cancelSourceImport(): void {
+    setSourceImportReview(null);
+    setExportState('');
+  }
+
+  async function applySourceImport(): Promise<void> {
+    if (!sourceImportReview?.result.project || sourceImportReview.result.errors.length) {
+      return;
+    }
+    const imported = sourceImportReview.result.project;
+    if (sourceImportReview.mode === 'overwrite') {
+      const snapshot = {
+        id: createId('snapshot'),
+        label: text.sourceImportSnapshotLabel(sourceImportReview.fileName),
+        createdAt: nowIso(),
+        project: cloneProjectForSnapshot(project)
+      };
+      const next = touchProject({
+        ...imported,
+        id: project.id,
+        createdAt: project.createdAt,
+        snapshots: [snapshot]
+      });
+      await saveProject(next);
+      firstSave.current = true;
+      setProject(next);
+      setKnownProjects((projects) => [next, ...projects.filter((item) => item.id !== project.id)]);
+      markProjectChangedSinceBackup(next.id);
+      setSelectedPageId(next.pages[0]?.id ?? '');
+      setExportState(text.sourceImportedOverwrite(sourceImportReview.fileName));
+    } else {
+      const next = touchProject({
+        ...imported,
+        id: createId('project'),
+        createdAt: nowIso(),
+        snapshots: []
+      });
+      await saveProject(project);
+      await saveProject(next);
+      firstSave.current = true;
+      setProject(next);
+      setKnownProjects((projects) => [next, project, ...projects.filter((item) => item.id !== next.id && item.id !== project.id)]);
+      markProjectChangedSinceBackup(next.id);
+      setSelectedPageId(next.pages[0]?.id ?? '');
+      setExportState(text.sourceImportedNew(sourceImportReview.fileName));
+    }
+    setSourceImportReview(null);
+    setSelectedTab('dashboard');
   }
 
   async function importYacho(file: File | undefined): Promise<void> {
@@ -880,7 +993,9 @@ export default function App(): JSX.Element {
                 project={project}
                 exportState={exportState}
                 exportBackup={exportBackup}
+                exportSourceBackup={exportSourceBackup}
                 importBackup={importBackup}
+                importSource={dryRunImportSource}
                 importYacho={importYacho}
                 exportPublic={exportPublic}
               />
@@ -893,6 +1008,12 @@ export default function App(): JSX.Element {
         text={text}
         onCancel={() => resolveConfirmation(false)}
         onConfirm={() => resolveConfirmation(true)}
+      />
+      <SourceImportWizard
+        review={sourceImportReview}
+        onModeChange={updateSourceImportMode}
+        onCancel={cancelSourceImport}
+        onApply={applySourceImport}
       />
     </I18nContext.Provider>
   );
@@ -1502,6 +1623,91 @@ function ConfirmationDialog({
             {request.confirmLabel}
           </button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function SourceImportWizard({
+  review,
+  onModeChange,
+  onCancel,
+  onApply
+}: {
+  review: SourceImportReview | null;
+  onModeChange: (mode: SourceImportMode) => void;
+  onCancel: () => void;
+  onApply: () => Promise<void>;
+}): JSX.Element | null {
+  const text = useUiText();
+  const sourceImportReady = Boolean(review?.result.project && review.result.errors.length === 0);
+  const applyLabel = review?.result.repairs.length ? text.sourceImportApply : text.sourceImportApplyClean;
+
+  useEffect(() => {
+    if (!review) {
+      return undefined;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel, review]);
+
+  if (!review) {
+    return null;
+  }
+
+  return (
+    <div className="confirmation-backdrop source-import-backdrop" role="presentation">
+      <section className="source-import-dialog" role="dialog" aria-modal="true" aria-labelledby="source-import-title">
+        <header className="source-import-head">
+          <span className={sourceImportReady ? 'source-import-icon ok' : 'source-import-icon error'}>
+            {sourceImportReady ? <CheckCircle2 size={20} aria-hidden="true" /> : <AlertTriangle size={20} aria-hidden="true" />}
+          </span>
+          <div>
+            <h2 id="source-import-title">{text.sourceImportReview}</h2>
+            <p>{text.sourceImportReviewCopy(review.fileName)}</p>
+          </div>
+        </header>
+        <div className="source-import-body">
+          <div className={sourceImportReady ? 'source-import-status ok' : 'source-import-status error'}>
+            {sourceImportReady ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+            <strong>{sourceImportReady ? text.sourceImportReady(review.fileName) : text.sourceImportHasErrors(review.fileName, review.result.errors.length)}</strong>
+          </div>
+          <fieldset className="source-import-modes">
+            <legend>{text.sourceImportMode}</legend>
+            <label className={review.mode === 'new' ? 'mode-option selected' : 'mode-option'}>
+              <input type="radio" name="source-import-mode" checked={review.mode === 'new'} onChange={() => onModeChange('new')} />
+              <span>
+                <strong>{text.sourceImportModeNew}</strong>
+                <small>{text.sourceImportModeNewCopy}</small>
+              </span>
+            </label>
+            <label className={review.mode === 'overwrite' ? 'mode-option selected' : 'mode-option'}>
+              <input type="radio" name="source-import-mode" checked={review.mode === 'overwrite'} onChange={() => onModeChange('overwrite')} />
+              <span>
+                <strong>{text.sourceImportModeOverwrite}</strong>
+                <small>{text.sourceImportModeOverwriteCopy}</small>
+              </span>
+            </label>
+          </fieldset>
+          <div className="source-import-issues">
+            <SourceImportIssueGroup title={text.sourceImportErrors(review.result.errors.length)} emptyText={text.sourceImportNoErrors} issues={review.result.errors} tone="error" />
+            <SourceImportIssueGroup title={text.sourceImportRepairs(review.result.repairs.length)} emptyText={text.sourceImportNoRepairs} issues={review.result.repairs} tone="repair" />
+            <SourceImportIssueGroup title={text.sourceImportWarnings(review.result.warnings.length)} emptyText={text.sourceImportNoWarnings} issues={review.result.warnings} tone="warning" />
+          </div>
+        </div>
+        <footer className="source-import-actions">
+          <button type="button" onClick={onCancel}>
+            <RotateCcw size={16} /> {text.sourceImportCancel}
+          </button>
+          <button type="button" className="primary-action" disabled={!sourceImportReady} onClick={() => void onApply()}>
+            <CheckCircle2 size={16} /> {sourceImportReady ? applyLabel : text.sourceImportBlocked}
+          </button>
+        </footer>
       </section>
     </div>
   );
@@ -2314,7 +2520,9 @@ function ExportPanel(props: {
   project: StudioProject;
   exportState: string;
   exportBackup: () => Promise<void>;
+  exportSourceBackup: () => Promise<void>;
   importBackup: (file?: File) => Promise<void>;
+  importSource: (file?: File) => Promise<void>;
   importYacho: (file?: File) => Promise<void>;
   exportPublic: () => Promise<void>;
 }): JSX.Element {
@@ -2327,10 +2535,29 @@ function ExportPanel(props: {
         <button type="button" onClick={() => void props.exportBackup()}>
           <Download size={16} /> {text.exportBackupZip}
         </button>
+        <button type="button" onClick={() => void props.exportSourceBackup()}>
+          <Archive size={16} /> {text.exportSourceZip}
+        </button>
         <label className="file-button">
           <FolderOpen size={16} /> {text.importBackupZip}
           <input type="file" accept=".zip" onChange={(event) => void props.importBackup(event.currentTarget.files?.[0])} />
         </label>
+        <label className="file-button">
+          <Upload size={16} /> {text.importSourceZip}
+          <input
+            type="file"
+            accept=".zip"
+            aria-label={text.importSourceZip}
+            onChange={(event) => {
+              void props.importSource(event.currentTarget.files?.[0]);
+              event.currentTarget.value = '';
+            }}
+          />
+        </label>
+        <p className="source-zip-warning">
+          <AlertTriangle size={16} />
+          <span>{text.sourceZipPlaintextWarning}</span>
+        </p>
       </div>
       <div className="export-panel">
         <h2>{text.publicStaticSite}</h2>
@@ -2354,5 +2581,30 @@ function ExportPanel(props: {
         <strong>{props.exportState}</strong>
       </div>
     </section>
+  );
+}
+
+function SourceImportIssueGroup(props: {
+  title: string;
+  emptyText: string;
+  issues: SourceZipIssue[];
+  tone: 'error' | 'warning' | 'repair';
+}): JSX.Element {
+  return (
+    <div className={`source-issue-group ${props.tone}`}>
+      <strong>{props.title}</strong>
+      {props.issues.length ? (
+        <ul>
+          {props.issues.map((issue, index) => (
+            <li key={`${issue.kind}-${issue.path ?? 'project'}-${index}`}>
+              {issue.path && <code>{issue.path}</code>}
+              <span>{issue.message}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>{props.emptyText}</p>
+      )}
+    </div>
   );
 }

@@ -130,6 +130,36 @@ test('close warning appears after edits until a project backup is exported', asy
   await expect.poll(async () => isBeforeUnloadBlocked(page)).toBe(false);
 });
 
+test('source zip export and import runs through dry-run review', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'プロジェクト管理', exact: true }).click();
+  await page.getByLabel('プロジェクト名').fill('Source Zip 元');
+  await page.getByRole('button', { name: 'エディタ', exact: true }).click();
+  await page.getByLabel('HTML互換のページ本文').fill('<main><h1>Source Zip Fixture</h1></main>');
+  await page.getByRole('button', { name: '書き出し' }).click();
+  await expect(page.getByText('Source Zip は Git 管理や手編集に向いた形式です。')).toBeVisible();
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Source Zip 書き出し' }).click();
+  const download = await downloadPromise;
+  const sourceZipPath = await download.path();
+  if (!sourceZipPath) throw new Error('Source Zip download path was not available');
+
+  await page.getByLabel('Source Zip 読み込み').setInputFiles(sourceZipPath);
+  const importDialog = page.getByRole('dialog', { name: 'Source Zip 取り込み確認' });
+  await expect(importDialog).toBeVisible();
+  await expect(importDialog.getByText('致命的なエラーはありません。')).toBeVisible();
+  await expect(importDialog.getByText('自動修復予定 0 件')).toBeVisible();
+  await expect(importDialog.getByText('警告 0 件')).toBeVisible();
+  await expect(importDialog.getByText('新規プロジェクトとして追加')).toBeVisible();
+  await importDialog.getByRole('button', { name: '取り込む' }).click();
+  await expect(importDialog).toHaveCount(0);
+
+  await expect(page.getByLabel('プロジェクト名')).toHaveValue('Source Zip 元');
+  await page.getByRole('button', { name: 'プロジェクト管理', exact: true }).click();
+  await expect(page.locator('.project-list-row')).toHaveCount(2);
+});
+
 test('flowchart nodes can be selected and repositioned', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /^フローチャート/ }).click();
