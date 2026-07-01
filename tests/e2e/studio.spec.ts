@@ -160,16 +160,16 @@ test('source zip export and import runs through dry-run review', async ({ page }
   await expect(page.locator('.project-list-row')).toHaveCount(2);
 });
 
-test('flowchart nodes can be selected and repositioned', async ({ page }) => {
+test('story map nodes can be selected and repositioned', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: /^フローチャート/ }).click();
-  await expect(page.getByText('選択中のノード: Opening Page')).toBeVisible();
+  await page.getByRole('button', { name: /^ストーリーマップ/ }).click();
+  await expect(page.getByText('選択中のノード: Default Site')).toBeVisible();
   await expect(page.locator('.react-flow__node').first()).toHaveClass(/selected/);
-  await expect(page.locator('.flow-table .row.active')).toContainText('Opening Page');
+  await expect(page.locator('.flow-table .row.active')).toContainText('Default Site');
 
   const node = page.locator('.react-flow__node').first();
   const before = await node.boundingBox();
-  if (!before) throw new Error('Flowchart node was not visible');
+  if (!before) throw new Error('Story Map node was not visible');
   await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
   await page.mouse.down();
   await page.mouse.move(before.x + before.width / 2 + 180, before.y + before.height / 2 + 120, { steps: 8 });
@@ -183,39 +183,35 @@ test('flowchart nodes can be selected and repositioned', async ({ page }) => {
     const after = await node.boundingBox();
     return after ? Math.round(after.y - before.y) : 0;
   }).toBeGreaterThan(40);
-  await expect(page.locator('.flow-table .row.active')).toContainText('Opening Page');
+  await expect(page.locator('.flow-table .row.active')).toContainText('Default Site');
 
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'エッジ追加' })).toBeDisabled();
-  await page.getByRole('button', { name: 'ノード追加' }).click();
   await expect(page.getByLabel('From（接続元）')).toHaveValue(/.+/);
   await expect(page.getByLabel('To（接続先）')).toHaveValue(/.+/);
   await expect.poll(async () => page.getByLabel('From（接続元）').evaluate((select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent)).toBe(
-    'From: Opening Page'
+    'From: Default Site'
   );
   await expect.poll(async () => page.getByLabel('To（接続先）').evaluate((select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent)).toBe(
-    'To: ノード 2'
+    'To: Opening Page'
   );
   await expect(page.locator('.react-flow__node.edge-source')).toHaveCount(1);
   await expect(page.locator('.react-flow__node.edge-target')).toHaveCount(1);
-  await expect(page.getByLabel('Opening Page のノード名').locator('xpath=ancestor::div[contains(@class, "row")][1]')).toHaveClass(/edge-source/);
-  await expect(page.getByLabel('ノード 2 のノード名').locator('xpath=ancestor::div[contains(@class, "row")][1]')).toHaveClass(/edge-target/);
-  await expect(page.getByText('Opening Page から ノード 2 へ接続します。')).toBeVisible();
-  await page.getByRole('button', { name: 'エッジ追加' }).click();
-  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(page.getByLabel('Default Site のノード名').locator('xpath=ancestor::div[contains(@class, "row")][1]')).toHaveClass(/edge-source/);
+  await expect(page.getByLabel('Opening Page のノード名').locator('xpath=ancestor::div[contains(@class, "row")][1]')).toHaveClass(/edge-target/);
   await expect(page.getByText('この接続はすでにあります。')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'エッジ追加' })).toBeDisabled();
 
   await page.getByRole('button', { name: 'エッジ削除' }).click();
-  await answerConfirmation(page, 'Opening Page から ノード 2', 'エッジ削除');
+  await answerConfirmation(page, 'Default Site から Opening Page', 'エッジ削除');
   await expect(page.locator('.react-flow__edge')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'エッジ追加' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'エッジ追加' }).click();
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
-  await page.getByRole('button', { name: 'ノード 2 を削除' }).click();
-  await answerConfirmation(page, 'ノード 2', '削除');
-  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
-  await expect(page.getByLabel('ノード 2 のノード名')).toHaveCount(0);
+  await page.getByRole('button', { name: 'ノード追加' }).click();
+  await page.getByRole('button', { name: 'ノード 3 を削除' }).click();
+  await answerConfirmation(page, 'ノード 3', '削除');
+  await expect(page.getByLabel('ノード 3 のノード名')).toHaveCount(0);
 });
 
 test('theme workspace edits CSS with a live preview surface', async ({ page }) => {

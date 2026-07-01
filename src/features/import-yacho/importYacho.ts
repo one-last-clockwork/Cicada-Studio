@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
-import type { ImportedScriptMetadata, StudioAsset, StudioPage, StudioProject, StudioTheme } from '../../types/project';
+import type { ImportedScriptMetadata, LegacyStudioProject, StudioAsset, StudioPage, StudioProject, StudioTheme } from '../../types/project';
 import { createDefaultFlowchart, createDefaultTheme, createId, createPage, nowIso } from '../../lib/projects/createProject';
+import { migrateProject } from '../../lib/projects/migrateProject';
 import { sanitizeHtml } from '../../lib/html/sanitize';
 import { hasTraversalPath, normalizeAssetPath, normalizePublicPath, safeSlug } from '../../lib/path-safety/pathSafety';
 import { bytesToBase64 } from '../../lib/crypto/encoding';
@@ -203,7 +204,7 @@ export async function importYachoProjectZip(input: Blob | ArrayBuffer): Promise<
       }
     : fallbackFlow;
 
-  return {
+  const legacyProject: LegacyStudioProject = {
     schemaVersion: 1,
     id: createId('project'),
     name: structure.title ?? structure.name ?? 'Imported YACHO Project',
@@ -219,4 +220,5 @@ export async function importYachoProjectZip(input: Blob | ArrayBuffer): Promise<
     importedScripts: await importScripts(zip),
     snapshots: []
   };
+  return migrateProject(legacyProject);
 }

@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import type { StudioProject } from '../../types/project';
 import { hasTraversalPath } from '../../lib/path-safety/pathSafety';
+import { migrateProject } from '../../lib/projects/migrateProject';
 
 const BACKUP_MANIFEST = {
   kind: 'cicada-studio-project-backup',
@@ -38,5 +39,5 @@ export async function importProjectBackupZip(input: Blob | ArrayBuffer): Promise
   if (manifest.kind !== BACKUP_MANIFEST.kind || manifest.version !== BACKUP_MANIFEST.version) {
     throw new Error('Backup zip is not a Cicada Studio backup.');
   }
-  return JSON.parse(await projectFile.async('text')) as StudioProject;
+  return migrateProject(JSON.parse(await projectFile.async('text')) as unknown);
 }

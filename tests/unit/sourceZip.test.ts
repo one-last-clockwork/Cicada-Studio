@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { dryRunImportProjectSourceZip, exportProjectSourceZip } from '../../src/features/backup/sourceZip';
 import { createId, createProject } from '../../src/lib/projects/createProject';
 import type { SourceZipPageMetadata, SourceZipScriptMetadata } from '../../src/features/backup/sourceZipTypes';
-import type { StudioFlowchart } from '../../src/types/project';
+import type { StudioProject, StudioStoryMap } from '../../src/types/project';
 
 async function loadZip(blob: Blob): Promise<JSZip> {
   return JSZip.loadAsync(blob);
@@ -21,12 +21,21 @@ async function readJson<T>(zip: JSZip, path: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+function firstSite(project: StudioProject) {
+  return project.sites[0];
+}
+
+function firstPage(project: StudioProject) {
+  return firstSite(project).pages[0];
+}
+
 describe('Source Zip backup format', () => {
   it('exports human-editable source files and imports author data without snapshots', async () => {
     const project = createProject('Source Roundtrip');
-    project.pages[0].bodyHtml = '<main><h1>Opening clue</h1></main>';
-    project.pages[0].memo = 'author memo stays in source backup';
-    project.pages[0].revealBlocks.push({
+    const page = firstPage(project);
+    page.bodyHtml = '<main><h1>Opening clue</h1></main>';
+    page.memo = 'author memo stays in source backup';
+    page.revealBlocks.push({
       id: createId('reveal'),
       label: 'Desk reveal',
       prompt: 'Desk code',
@@ -40,15 +49,15 @@ describe('Source Zip backup format', () => {
       terms: ['archive'],
       aliases: ['archives'],
       mode: 'contains',
-      targetPageId: project.pages[0].id,
+      targetPageId: page.id,
       hint: 'Search the archive.',
       failureMessage: 'no'
     });
     project.conditions.push({
       id: createId('condition'),
       label: 'Opening branch',
-      sourcePageId: project.pages[0].id,
-      targetPageId: project.pages[0].id,
+      sourcePageId: page.id,
+      targetPageId: page.id,
       publicHint: 'follow the branch',
       internalNote: 'internal route note'
     });
@@ -85,9 +94,11 @@ describe('Source Zip backup format', () => {
         'sites/default/pages/opening-page.json',
         'sites/default/themes/default-case-file.css',
         'sites/default/themes/default-case-file.json',
-        'story/flowcharts.json',
+        'story/story-maps.json',
+        'story/story-state.json',
         'search/rules.json',
         'conditions.json',
+        'messenger/threads.json',
         'assets/manifest.json',
         'assets/files/note.txt',
         'scripts/metadata.json',
@@ -101,9 +112,9 @@ describe('Source Zip backup format', () => {
     const result = await dryRunImportProjectSourceZip(await zipToBlob(zip));
     expect(result.ok).toBe(true);
     expect(result.project?.snapshots).toEqual([]);
-    expect(result.project?.pages[0].memo).toBe('author memo stays in source backup');
-    expect(result.project?.pages[0].bodyHtml).toContain('Opening clue');
-    expect(result.project?.pages[0].revealBlocks[0].answerAliases).toContain('midsummer');
+    expect(result.project?.sites[0].pages[0].memo).toBe('author memo stays in source backup');
+    expect(result.project?.sites[0].pages[0].bodyHtml).toContain('Opening clue');
+    expect(result.project?.sites[0].pages[0].revealBlocks[0].answerAliases).toContain('midsummer');
     expect(result.project?.assets[0].name).toBe('note.txt');
     expect(result.project?.importedScripts[0].source).toContain('source script');
   });
@@ -120,17 +131,18 @@ describe('Source Zip backup format', () => {
 
     const result = await dryRunImportProjectSourceZip(await zipToBlob(zip));
     expect(result.ok).toBe(true);
-    expect(result.project?.pages[0].bodyHtml).toContain('Edited by hand');
-    expect(result.project?.pages[0].id).not.toBe(project.pages[0].id);
-    expect(result.project?.pages[0].themeId).toBe(result.project?.themes[0].id);
+    expect(result.project?.sites[0].pages[0].bodyHtml).toContain('Edited by hand');
+    expect(result.project?.sites[0].pages[0].id).not.toBe(firstPage(project).id);
+    expect(result.project?.sites[0].pages[0].themeId).toBe(result.project?.sites[0].themes[0].id);
     expect(result.repairs.map((item) => item.message).join('\n')).toContain('Missing page id was generated');
     expect(result.repairs.map((item) => item.message).join('\n')).toContain('changed to the default theme');
   });
 
-  it('exports a clean source zip even when the project has duplicate page paths and stale flowchart page refs', async () => {
+  it('exports a clean source zip even when the project has duplicate page paths and stale Story Map page refs', async () => {
     const project = createProject('Canonical Source');
+    const site = firstSite(project);
     const duplicatePage = {
-      ...project.pages[0],
+      ...firstPage(project),
       id: createId('page'),
       title: 'Duplicate Path',
       slug: 'page-3',
@@ -143,11 +155,15 @@ describe('Source Zip backup format', () => {
       title: 'Duplicate Path Two',
       pageNumber: 3
     };
-    project.pages.push(duplicatePage, duplicatePageTwo);
-    project.flowcharts[0].nodes.push({
+    site.pages.push(duplicatePage, duplicatePageTwo);
+    project.storyMaps[0].nodes.push({
       id: createId('node'),
       label: 'Stale page ref',
+      type: 'page',
+      siteId: site.id,
       pageId: 'missing-page',
+      notes: '',
+      tags: [],
       x: 160,
       y: 160
     });
@@ -158,14 +174,14 @@ describe('Source Zip backup format', () => {
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual([]);
     expect(result.repairs).toEqual([]);
-    expect(result.project?.pages.map((page) => page.slug)).toEqual(['opening-page', 'page-3', 'page-3-2']);
-    expect(result.project?.pages.map((page) => page.path)).toEqual(['index.html', 'page-3.html', 'page-3-2.html']);
-    expect(result.project?.flowcharts[0].nodes.find((node) => node.label === 'Stale page ref')?.pageId).toBeUndefined();
+    expect(result.project?.sites[0].pages.map((page) => page.slug)).toEqual(['opening-page', 'page-3', 'page-3-2']);
+    expect(result.project?.sites[0].pages.map((page) => page.path)).toEqual(['index.html', 'page-3.html', 'page-3-2.html']);
+    expect(result.project?.storyMaps[0].nodes.find((node) => node.label === 'Stale page ref')?.pageId).toBeUndefined();
   });
 
-  it('removes broken flowchart edges but blocks search and condition refs to missing pages', async () => {
+  it('removes broken Story Map edges but blocks search and condition refs to missing pages', async () => {
     const project = createProject('Broken References');
-    const nodeId = project.flowcharts[0].nodes[0].id;
+    const nodeId = project.storyMaps[0].nodes[0].id;
     project.searchRules.push({
       id: createId('search'),
       label: 'Broken search',
@@ -179,27 +195,33 @@ describe('Source Zip backup format', () => {
     project.conditions.push({
       id: createId('condition'),
       label: 'Broken condition',
-      sourcePageId: project.pages[0].id,
+      sourcePageId: firstPage(project).id,
       targetPageId: 'missing-page',
       publicHint: '',
       internalNote: ''
     });
 
     const zip = await loadZip(await exportProjectSourceZip(project));
-    const flowcharts = await readJson<StudioFlowchart[]>(zip, 'story/flowcharts.json');
-    flowcharts[0].edges.push({
+    const storyMaps = await readJson<StudioStoryMap[]>(zip, 'story/story-maps.json');
+    storyMaps[0].edges.push({
       id: createId('edge'),
       source: nodeId,
       target: 'missing-node',
-      label: 'Broken'
+      label: 'Broken',
+      action: 'read',
+      pathRole: 'intended',
+      prerequisiteMode: 'permissive',
+      notes: '',
+      tags: [],
+      effects: []
     });
-    zip.file('story/flowcharts.json', JSON.stringify(flowcharts, null, 2));
+    zip.file('story/story-maps.json', JSON.stringify(storyMaps, null, 2));
 
     const result = await dryRunImportProjectSourceZip(await zipToBlob(zip));
     expect(result.ok).toBe(false);
     expect(result.errors.map((item) => item.message).join('\n')).toContain('Search rule "Broken search" references a missing target page');
     expect(result.errors.map((item) => item.message).join('\n')).toContain('Condition "Broken condition" references a missing target page');
-    expect(result.repairs.map((item) => item.message).join('\n')).toContain('Flowchart edge with a missing node reference was removed');
+    expect(result.repairs.map((item) => item.message).join('\n')).toContain('Story Map edge with a missing node reference was removed');
   });
 
   it('forces imported scripts disabled even when hand-edited metadata enables them', async () => {

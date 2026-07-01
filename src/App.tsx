@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   LockKeyhole,
   Maximize2,
+  MessageCircle,
   MoveDown,
   MoveUp,
   Palette,
@@ -44,22 +45,28 @@ import { getPreviewHtml, getPreviewSandbox } from './features/preview/previewPol
 import { buildPublicExportZip } from './lib/export-public/publicExport';
 import { checkPublicExportZip } from './lib/export-public/checkLeaks';
 import { escapeHtml, renderThemeDocument } from './lib/html/sanitize';
-import { createId, createPage, createProject, nowIso, touchProject } from './lib/projects/createProject';
+import { createDefaultSite, createId, createPage, createProject, nowIso, touchProject } from './lib/projects/createProject';
+import { allPageRefs, allPages, findPageRef, primarySite, siteById, updatePageInProject, updateSite, updateThemeInProject } from './lib/projects/projectAccess';
 import { deleteProject as deleteStoredProject, listProjects, saveProject } from './lib/db/projectsDb';
 import { normalizeAssetPath, normalizePublicPath, safeSlug } from './lib/path-safety/pathSafety';
 import { downloadBlob } from './lib/zip/blob';
 import { splitTermList } from './lib/crypto/normalization';
 import type {
-  FlowEdge,
-  FlowNode,
   MatchMode,
+  MessengerNode,
+  MessengerThread,
   RevealBlock,
   SearchRule,
+  StoryEffect,
+  StoryMapEdge,
+  StoryMapNode,
+  StoryTrigger,
   StudioAsset,
   StudioCondition,
-  StudioFlowchart,
   StudioPage,
   StudioProject,
+  StudioSite,
+  StudioStoryMap,
   StudioTheme,
   UnlockPage
 } from './types/project';
@@ -132,6 +139,14 @@ function uniquePagePath(base: string, pages: StudioPage[], fallback: string): st
     suffix += 1;
   }
   return candidate;
+}
+
+function normalizeSitePathPrefix(value: string, fallback: string): string {
+  const raw = value.replace(/^\/+|\/+$/g, '');
+  if (!raw) {
+    return '';
+  }
+  return normalizePublicPath(`${raw}/index.html`, `${fallback}/index.html`).replace(/\/?index\.html$/i, '');
 }
 
 function parseList(value: string): string[] {
@@ -312,7 +327,8 @@ export default function App(): JSX.Element {
   });
   const text = UI_TEXT[language];
   const [project, setProject] = useState<StudioProject>(() => createProject(UI_TEXT.ja.defaultProjectName));
-  const [selectedPageId, setSelectedPageId] = useState(project.pages[0]?.id ?? '');
+  const [selectedSiteId, setSelectedSiteId] = useState('');
+  const [selectedPageId, setSelectedPageId] = useState('');
   const [selectedTab, setSelectedTab] = useState<StudioTab>('intro');
   const [knownProjects, setKnownProjects] = useState<StudioProject[]>([]);
   const [loadState, setLoadState] = useState<string>(UI_TEXT.ja.loading);
@@ -330,6 +346,11 @@ export default function App(): JSX.Element {
     () => Object.values(projectsChangedSinceBackup).filter(Boolean).length,
     [projectsChangedSinceBackup]
   );
+  const activeSite = useMemo(() => siteById(project, selectedSiteId || project.primarySiteId), [project, selectedSiteId]);
+  const activePages = activeSite.pages;
+  const activeThemes = activeSite.themes;
+  const projectPageRefs = useMemo(() => allPageRefs(project), [project]);
+  const projectPages = useMemo(() => projectPageRefs.map((ref) => ref.page), [projectPageRefs]);
 
   useEffect(() => {
     let alive = true;
@@ -339,7 +360,8 @@ export default function App(): JSX.Element {
         const active = projects[0] ?? createProject(UI_TEXT.ja.defaultProjectName);
         setProject(active);
         setKnownProjects(projects.length ? projects : [active]);
-        setSelectedPageId(active.pages[0]?.id ?? '');
+        setSelectedSiteId(primarySite(active).id);
+        setSelectedPageId(primarySite(active).pages[0]?.id ?? '');
         if (!projects.length) {
           await saveProject(active);
         }
@@ -384,9 +406,19 @@ export default function App(): JSX.Element {
   }, [project, text]);
 
   const selectedPage = useMemo(
-    () => project.pages.find((page) => page.id === selectedPageId) ?? project.pages[0],
-    [project.pages, selectedPageId]
+    () => activePages.find((page) => page.id === selectedPageId) ?? activePages[0],
+    [activePages, selectedPageId]
   );
+
+  useEffect(() => {
+    if (!project.sites.some((site) => site.id === activeSite.id)) {
+      setSelectedSiteId(primarySite(project).id);
+      return;
+    }
+    if (!activePages.some((page) => page.id === selectedPageId)) {
+      setSelectedPageId(activePages[0]?.id ?? '');
+    }
+  }, [activePages, activeSite.id, project, selectedPageId]);
 
   function updateProject(updater: (draft: StudioProject) => StudioProject): void {
     markProjectChangedSinceBackup(project.id);
@@ -409,10 +441,7 @@ export default function App(): JSX.Element {
   }
 
   function updatePage(pageId: string, updater: (page: StudioPage) => StudioPage): void {
-    updateProject((current) => ({
-      ...current,
-      pages: current.pages.map((page) => (page.id === pageId ? updater(page) : page))
-    }));
+    updateProject((current) => updatePageInProject(current, pageId, updater));
   }
 
   function requestConfirmation(request: ConfirmationRequest): Promise<boolean> {
@@ -436,7 +465,8 @@ export default function App(): JSX.Element {
     setProject(next);
     setKnownProjects((projects) => [next, ...projects]);
     markProjectChangedSinceBackup(next.id);
-    setSelectedPageId(next.pages[0]?.id ?? '');
+    setSelectedSiteId(primarySite(next).id);
+    setSelectedPageId(primarySite(next).pages[0]?.id ?? '');
     setSelectedTab(targetTab);
     setSaveState(text.newProjectCreated);
   }
@@ -455,7 +485,8 @@ export default function App(): JSX.Element {
       }
       setKnownProjects(mergedProjects);
       setProject(next);
-      setSelectedPageId(next.pages[0]?.id ?? '');
+      setSelectedSiteId(primarySite(next).id);
+      setSelectedPageId(primarySite(next).pages[0]?.id ?? '');
       setSaveState(text.loaded(next.name));
     } catch (error: unknown) {
       setSaveState(error instanceof Error ? error.message : text.autosaveFailed);
@@ -484,7 +515,8 @@ export default function App(): JSX.Element {
       clearProjectChangedSinceBackup(project.id);
       firstSave.current = true;
       setProject(next);
-      setSelectedPageId(next.pages[0]?.id ?? '');
+      setSelectedSiteId(primarySite(next).id);
+      setSelectedPageId(primarySite(next).pages[0]?.id ?? '');
       setLoadState(text.loaded(next.name));
       setSaveState(text.deletedProject(deletedName));
     } catch (error: unknown) {
@@ -493,15 +525,15 @@ export default function App(): JSX.Element {
   }
 
   function addPage(): void {
-    const slug = uniquePageSlug(`page-${project.pages.length + 1}`, project.pages, `page-${project.pages.length + 1}`);
+    const slug = uniquePageSlug(`page-${activePages.length + 1}`, activePages, `page-${activePages.length + 1}`);
     const page = createPage({
-      title: text.newPageTitle(project.pages.length + 1),
+      title: text.newPageTitle(activePages.length + 1),
       slug,
-      path: uniquePagePath(`${slug}.html`, project.pages, `${slug}.html`),
-      pageNumber: project.pages.length + 1,
-      themeId: project.themes[0]?.id
+      path: uniquePagePath(`${slug}.html`, activePages, `${slug}.html`),
+      pageNumber: activePages.length + 1,
+      themeId: activeThemes[0]?.id
     });
-    updateProject((current) => ({ ...current, pages: [...current.pages, page] }));
+    updateProject((current) => updateSite(current, activeSite.id, (site) => ({ ...site, pages: [...site.pages, page] })));
     setSelectedPageId(page.id);
     setSelectedTab('editor');
   }
@@ -515,24 +547,24 @@ export default function App(): JSX.Element {
     if (!confirmed) {
       return;
     }
-    const slug = uniquePageSlug(`${page.slug}-copy`, project.pages, 'copy');
+    const slug = uniquePageSlug(`${page.slug}-copy`, activePages, 'copy');
     const copy = {
       ...page,
       id: createId('page'),
       title: `${page.title} ${text.duplicateSuffix}`,
       slug,
-      path: uniquePagePath(`${slug}.html`, project.pages, 'copy.html'),
-      pageNumber: project.pages.length + 1
+      path: uniquePagePath(`${slug}.html`, activePages, 'copy.html'),
+      pageNumber: activePages.length + 1
     };
-    updateProject((current) => ({ ...current, pages: [...current.pages, copy] }));
+    updateProject((current) => updateSite(current, activeSite.id, (site) => ({ ...site, pages: [...site.pages, copy] })));
     setSelectedPageId(copy.id);
   }
 
   async function deletePage(pageId: string): Promise<void> {
-    if (project.pages.length === 1) {
+    if (activePages.length === 1) {
       return;
     }
-    const targetPage = project.pages.find((page) => page.id === pageId);
+    const targetPage = activePages.find((page) => page.id === pageId);
     if (!targetPage) {
       return;
     }
@@ -546,31 +578,36 @@ export default function App(): JSX.Element {
       return;
     }
     updateProject((current) => {
-      const pages = current.pages.filter((page) => page.id !== pageId).map((page, index) => ({ ...page, pageNumber: index + 1 }));
+      const withoutPage = updateSite(current, activeSite.id, (site) => ({
+        ...site,
+        pages: site.pages.filter((page) => page.id !== pageId).map((page, index) => ({ ...page, pageNumber: index + 1 }))
+      }));
       return {
-        ...current,
-        pages,
+        ...withoutPage,
         searchRules: current.searchRules.filter((rule) => rule.targetPageId !== pageId),
         conditions: current.conditions.filter((condition) => condition.sourcePageId !== pageId && condition.targetPageId !== pageId),
-        flowcharts: current.flowcharts.map((flowchart) => ({
-          ...flowchart,
-          nodes: flowchart.nodes.map((node) => (node.pageId === pageId ? { ...node, pageId: undefined } : node))
+        storyMaps: current.storyMaps.map((storyMap) => ({
+          ...storyMap,
+          nodes: storyMap.nodes.map((node) =>
+            node.pageId === pageId ? { ...node, pageId: undefined, linkedEntity: undefined, type: node.type === 'page' ? 'discovery' : node.type } : node
+          )
         }))
       };
     });
-    setSelectedPageId(project.pages.find((page) => page.id !== pageId)?.id ?? '');
+    setSelectedPageId(activePages.find((page) => page.id !== pageId)?.id ?? '');
   }
 
   function movePage(pageId: string, direction: -1 | 1): void {
     updateProject((current) => {
-      const pages = [...current.pages];
+      const site = siteById(current, activeSite.id);
+      const pages = [...site.pages];
       const index = pages.findIndex((page) => page.id === pageId);
       const next = index + direction;
       if (index < 0 || next < 0 || next >= pages.length) {
         return current;
       }
       [pages[index], pages[next]] = [pages[next], pages[index]];
-      return { ...current, pages: pages.map((page, pageIndex) => ({ ...page, pageNumber: pageIndex + 1 })) };
+      return updateSite(current, site.id, (target) => ({ ...target, pages: pages.map((page, pageIndex) => ({ ...page, pageNumber: pageIndex + 1 })) }));
     });
   }
 
@@ -637,50 +674,58 @@ export default function App(): JSX.Element {
   function addTheme(): StudioTheme {
     const theme: StudioTheme = {
       id: createId('theme'),
-      name: text.themeName(project.themes.length + 1),
+      name: text.themeName(activeThemes.length + 1),
       css: 'body { background: #fffdf8; color: #24272d; }'
     };
-    updateProject((current) => ({ ...current, themes: [...current.themes, theme] }));
+    updateProject((current) => updateSite(current, activeSite.id, (site) => ({ ...site, themes: [...site.themes, theme] })));
     return theme;
   }
 
   function updateTheme(themeId: string, patch: Partial<StudioTheme>): void {
-    updateProject((current) => ({
-      ...current,
-      themes: current.themes.map((theme) => (theme.id === themeId ? { ...theme, ...patch } : theme))
-    }));
+    updateProject((current) => updateThemeInProject(current, themeId, (theme) => ({ ...theme, ...patch })));
   }
 
-  function addFlowNode(flow: StudioFlowchart): void {
-    const node: FlowNode = {
+  function addStoryMapNode(storyMap: StudioStoryMap): void {
+    const node: StoryMapNode = {
       id: createId('node'),
-      label: text.flowNode(flow.nodes.length + 1),
+      label: text.flowNode(storyMap.nodes.length + 1),
+      type: selectedPage ? 'page' : 'discovery',
+      linkedEntity: selectedPage ? { kind: 'page', siteId: activeSite.id, pageId: selectedPage.id, id: selectedPage.id } : undefined,
+      siteId: selectedPage ? activeSite.id : undefined,
       pageId: selectedPage?.id,
-      x: 90 + (flow.nodes.length % 4) * 220,
-      y: 100 + Math.floor(flow.nodes.length / 4) * 130
+      notes: '',
+      tags: [],
+      x: 90 + (storyMap.nodes.length % 4) * 220,
+      y: 100 + Math.floor(storyMap.nodes.length / 4) * 130
     };
     updateProject((current) => ({
       ...current,
-      flowcharts: current.flowcharts.map((item) => (item.id === flow.id ? { ...item, nodes: [...item.nodes, node] } : item))
+      storyMaps: current.storyMaps.map((item) => (item.id === storyMap.id ? { ...item, nodes: [...item.nodes, node] } : item))
     }));
   }
 
-  function addFlowEdge(flow: StudioFlowchart, sourceId: string, targetId: string): void {
-    if (!sourceId || !targetId || sourceId === targetId || flow.edges.some((edge) => edge.source === sourceId && edge.target === targetId)) return;
-    const edge: FlowEdge = {
+  function addStoryMapEdge(storyMap: StudioStoryMap, sourceId: string, targetId: string): void {
+    if (!sourceId || !targetId || sourceId === targetId || storyMap.edges.some((edge) => edge.source === sourceId && edge.target === targetId)) return;
+    const edge: StoryMapEdge = {
       id: createId('edge'),
       source: sourceId,
       target: targetId,
-      label: text.routeLabel
+      label: text.routeLabel,
+      action: 'read',
+      pathRole: 'intended',
+      prerequisiteMode: 'permissive',
+      notes: '',
+      tags: [],
+      effects: []
     };
     updateProject((current) => ({
       ...current,
-      flowcharts: current.flowcharts.map((item) => (item.id === flow.id ? { ...item, edges: [...item.edges, edge] } : item))
+      storyMaps: current.storyMaps.map((item) => (item.id === storyMap.id ? { ...item, edges: [...item.edges, edge] } : item))
     }));
   }
 
   function addSearchRule(): void {
-    const targetPageId = selectedPage?.id ?? project.pages[0]?.id ?? '';
+    const targetPageId = selectedPage?.id ?? projectPages[0]?.id ?? '';
     const rule: SearchRule = {
       id: createId('search'),
       label: text.searchRuleLabel(project.searchRules.length + 1),
@@ -702,8 +747,8 @@ export default function App(): JSX.Element {
   }
 
   function addCondition(): void {
-    const first = project.pages[0]?.id ?? '';
-    const second = project.pages[1]?.id ?? first;
+    const first = projectPages[0]?.id ?? '';
+    const second = projectPages[1]?.id ?? first;
     const condition: StudioCondition = {
       id: createId('condition'),
       label: text.routeName(project.conditions.length + 1),
@@ -720,6 +765,105 @@ export default function App(): JSX.Element {
       ...current,
       conditions: current.conditions.map((condition) => (condition.id === conditionId ? { ...condition, ...patch } : condition))
     }));
+  }
+
+  function addSite(): void {
+    const site = createDefaultSite({
+      name: `${text.tabs.sites} ${project.sites.length + 1}`,
+      slug: safeSlug(`site-${project.sites.length + 1}`, `site-${project.sites.length + 1}`),
+      pathPrefix: `sites/site-${project.sites.length + 1}`
+    });
+    updateProject((current) => ({ ...current, sites: [...current.sites, site] }));
+    setSelectedSiteId(site.id);
+    setSelectedPageId(site.pages[0]?.id ?? '');
+  }
+
+  function updateSiteDetails(siteId: string, patch: Partial<Pick<StudioSite, 'name' | 'slug' | 'pathPrefix'>>): void {
+    updateProject((current) => updateSite(current, siteId, (site) => ({ ...site, ...patch })));
+  }
+
+  async function duplicateSite(site: StudioSite): Promise<void> {
+    const confirmed = await requestConfirmation({
+      title: text.duplicateSite,
+      message: text.duplicateSiteConfirm(site.name),
+      confirmLabel: text.duplicateSite
+    });
+    if (!confirmed) return;
+    const suffix = project.sites.length + 1;
+    const pageIdMap = new Map<string, string>();
+    const themeIdMap = new Map<string, string>();
+    const themes = site.themes.map((theme) => {
+      const id = createId('theme');
+      themeIdMap.set(theme.id, id);
+      return { ...theme, id, name: `${theme.name} ${text.duplicateSuffix}` };
+    });
+    const pages = site.pages.map((page, index) => {
+      const id = createId('page');
+      pageIdMap.set(page.id, id);
+      return {
+        ...page,
+        id,
+        title: `${page.title} ${text.duplicateSuffix}`,
+        slug: safeSlug(`${page.slug}-copy`, `page-${index + 1}`),
+        path: normalizePublicPath(`${page.slug}-copy.html`, `page-${index + 1}.html`),
+        pageNumber: index + 1,
+        themeId: page.themeId ? themeIdMap.get(page.themeId) : undefined
+      };
+    });
+    const copy: StudioSite = {
+      ...site,
+      id: createId('site'),
+      name: `${site.name} ${text.duplicateSuffix}`,
+      slug: safeSlug(`${site.slug}-copy-${suffix}`, `site-${suffix}`),
+      pathPrefix: `sites/${safeSlug(`${site.slug}-copy-${suffix}`, `site-${suffix}`)}`,
+      pages,
+      themes
+    };
+    updateProject((current) => ({ ...current, sites: [...current.sites, copy] }));
+    setSelectedSiteId(copy.id);
+    setSelectedPageId(copy.pages[0]?.id ?? '');
+  }
+
+  async function deleteSite(siteId: string): Promise<void> {
+    if (project.sites.length <= 1) {
+      return;
+    }
+    const targetSite = project.sites.find((site) => site.id === siteId);
+    if (!targetSite) {
+      return;
+    }
+    const confirmed = await requestConfirmation({
+      title: text.deleteSite,
+      message: text.deleteSiteConfirm(targetSite.name),
+      confirmLabel: text.deleteSite,
+      tone: 'danger'
+    });
+    if (!confirmed) {
+      return;
+    }
+    const removedPageIds = new Set(targetSite.pages.map((page) => page.id));
+    updateProject((current) => {
+      const sites = current.sites.filter((site) => site.id !== siteId);
+      const nextPrimarySiteId = current.primarySiteId === siteId ? sites[0]?.id ?? current.primarySiteId : current.primarySiteId;
+      return {
+        ...current,
+        primarySiteId: nextPrimarySiteId,
+        sites,
+        searchRules: current.searchRules.filter((rule) => !removedPageIds.has(rule.targetPageId)),
+        conditions: current.conditions.filter((condition) => !removedPageIds.has(condition.sourcePageId) && !removedPageIds.has(condition.targetPageId)),
+        storyMaps: current.storyMaps.map((storyMap) => ({
+          ...storyMap,
+          nodes: storyMap.nodes.map((node) =>
+            node.siteId === siteId || (node.pageId && removedPageIds.has(node.pageId))
+              ? { ...node, siteId: undefined, pageId: undefined, linkedEntity: undefined, type: node.type === 'site' || node.type === 'page' ? 'discovery' : node.type }
+              : node
+          )
+        }))
+      };
+    });
+    const nextSite = project.sites.find((site) => site.id !== siteId) ?? activeSite;
+    setSelectedSiteId(nextSite.id);
+    setSelectedPageId(nextSite.pages[0]?.id ?? '');
   }
 
   async function manualSave(): Promise<void> {
@@ -762,7 +906,8 @@ export default function App(): JSX.Element {
     setProject(touchProject(imported));
     setKnownProjects((projects) => [imported, ...projects.filter((item) => item.id !== imported.id)]);
     clearProjectChangedSinceBackup(imported.id);
-    setSelectedPageId(imported.pages[0]?.id ?? '');
+    setSelectedSiteId(primarySite(imported).id);
+    setSelectedPageId(primarySite(imported).pages[0]?.id ?? '');
     setExportState(text.importedBackup(file.name));
   }
 
@@ -810,7 +955,8 @@ export default function App(): JSX.Element {
       setProject(next);
       setKnownProjects((projects) => [next, ...projects.filter((item) => item.id !== project.id)]);
       markProjectChangedSinceBackup(next.id);
-      setSelectedPageId(next.pages[0]?.id ?? '');
+      setSelectedSiteId(primarySite(next).id);
+      setSelectedPageId(primarySite(next).pages[0]?.id ?? '');
       setExportState(text.sourceImportedOverwrite(sourceImportReview.fileName));
     } else {
       const next = touchProject({
@@ -825,7 +971,8 @@ export default function App(): JSX.Element {
       setProject(next);
       setKnownProjects((projects) => [next, project, ...projects.filter((item) => item.id !== next.id && item.id !== project.id)]);
       markProjectChangedSinceBackup(next.id);
-      setSelectedPageId(next.pages[0]?.id ?? '');
+      setSelectedSiteId(primarySite(next).id);
+      setSelectedPageId(primarySite(next).pages[0]?.id ?? '');
       setExportState(text.sourceImportedNew(sourceImportReview.fileName));
     }
     setSourceImportReview(null);
@@ -838,19 +985,22 @@ export default function App(): JSX.Element {
     setProject(imported);
     setKnownProjects((projects) => [imported, ...projects]);
     markProjectChangedSinceBackup(imported.id);
-    setSelectedPageId(imported.pages[0]?.id ?? '');
+    setSelectedSiteId(primarySite(imported).id);
+    setSelectedPageId(primarySite(imported).pages[0]?.id ?? '');
     setExportState(text.importedYacho(file.name));
   }
 
-  async function exportPublic(): Promise<void> {
+  async function exportPublic(siteId?: string): Promise<void> {
     setExportState(text.buildingPublicZip);
-    const blob = await buildPublicExportZip(project);
+    const blob = await buildPublicExportZip(project, siteId ? { siteId } : undefined);
     const check = await checkPublicExportZip(blob, project);
     if (!check.ok) {
       setExportState(text.publicExportBlocked(check.findings.map((finding) => finding.reason).join('; ')));
       return;
     }
-    downloadBlob(blob, `${safeSlug(project.name, 'public-site')}-public.zip`);
+    const site = siteId ? siteById(project, siteId) : undefined;
+    const baseName = site ? `${project.name}-${site.name}` : project.name;
+    downloadBlob(blob, `${safeSlug(baseName, 'public-site')}-public.zip`);
     setExportState(text.publicZipPassed(check.files.length));
   }
 
@@ -936,15 +1086,31 @@ export default function App(): JSX.Element {
             {selectedTab === 'dashboard' && (
               <Dashboard
                 project={project}
+                pageRefs={projectPageRefs}
                 selectedPageId={selectedPage?.id ?? ''}
                 onSelectPage={setSelectedPageId}
                 onAddPage={addPage}
                 setTab={setSelectedTab}
               />
             )}
+            {selectedTab === 'sites' && (
+              <SitesPanel
+                project={project}
+                selectedSiteId={activeSite.id}
+                onSelectSite={(siteId) => {
+                  const site = siteById(project, siteId);
+                  setSelectedSiteId(site.id);
+                  setSelectedPageId(site.pages[0]?.id ?? '');
+                }}
+                onAddSite={addSite}
+                onDuplicateSite={duplicateSite}
+                onDeleteSite={deleteSite}
+                onUpdateSite={updateSiteDetails}
+              />
+            )}
             {selectedTab === 'pages' && (
               <PagesPanel
-                project={project}
+                site={activeSite}
                 selectedPageId={selectedPage?.id ?? ''}
                 onAdd={addPage}
                 onDuplicate={duplicatePage}
@@ -960,6 +1126,7 @@ export default function App(): JSX.Element {
             {selectedTab === 'editor' && selectedPage && (
               <EditorPanel
                 project={project}
+                site={activeSite}
                 page={selectedPage}
                 setSelectedPageId={setSelectedPageId}
                 updatePage={updatePage}
@@ -972,21 +1139,23 @@ export default function App(): JSX.Element {
             {selectedTab === 'assets' && (
               <AssetsPanel project={project} selectedPage={selectedPage} addAssets={addAssets} updateProject={updateProject} updatePage={updatePage} />
             )}
-            {selectedTab === 'themes' && <ThemesPanel project={project} addTheme={addTheme} updateTheme={updateTheme} updateProject={updateProject} />}
-            {selectedTab === 'flowchart' && (
-              <FlowchartPanel
+            {selectedTab === 'themes' && <ThemesPanel project={project} site={activeSite} addTheme={addTheme} updateTheme={updateTheme} updateProject={updateProject} />}
+            {selectedTab === 'storyMap' && (
+              <StoryMapPanel
                 project={project}
-                addFlowNode={addFlowNode}
-                addFlowEdge={addFlowEdge}
+                pageRefs={projectPageRefs}
+                addStoryMapNode={addStoryMapNode}
+                addStoryMapEdge={addStoryMapEdge}
                 updateProject={updateProject}
                 requestConfirmation={requestConfirmation}
               />
             )}
+            {selectedTab === 'messenger' && <MessengerPanel project={project} updateProject={updateProject} />}
             {selectedTab === 'search' && (
-              <SearchPanel project={project} addSearchRule={addSearchRule} updateSearchRule={updateSearchRule} updateProject={updateProject} />
+              <SearchPanel project={project} pageRefs={projectPageRefs} addSearchRule={addSearchRule} updateSearchRule={updateSearchRule} updateProject={updateProject} />
             )}
             {selectedTab === 'conditions' && (
-              <ConditionsPanel project={project} addCondition={addCondition} updateCondition={updateCondition} updateProject={updateProject} />
+              <ConditionsPanel project={project} pageRefs={projectPageRefs} addCondition={addCondition} updateCondition={updateCondition} updateProject={updateProject} />
             )}
             {selectedTab === 'export' && (
               <ExportPanel
@@ -997,6 +1166,8 @@ export default function App(): JSX.Element {
                 importBackup={importBackup}
                 importSource={dryRunImportSource}
                 importYacho={importYacho}
+                selectedSite={activeSite}
+                updateStoryNamespace={(storyNamespace) => updateProject((current) => ({ ...current, storyNamespace }))}
                 exportPublic={exportPublic}
               />
             )}
@@ -1023,11 +1194,13 @@ const TAB_ICONS: Record<StudioTab, LucideIcon> = {
   intro: Info,
   projects: FolderOpen,
   dashboard: LayoutDashboard,
+  sites: Globe2,
   pages: FileText,
   editor: FilePlus,
   assets: Image,
   themes: Palette,
-  flowchart: GitBranch,
+  storyMap: GitBranch,
+  messenger: MessageCircle,
   search: Search,
   conditions: LockKeyhole,
   export: Download
@@ -1044,8 +1217,8 @@ function Sidebar({
 }): JSX.Element {
   const text = useUiText();
   const groups: Array<{ label: string; tabs: StudioTab[] }> = [
-    { label: text.navOverview, tabs: ['intro', 'projects', 'dashboard', 'pages', 'flowchart'] },
-    { label: text.navWriting, tabs: ['editor', 'assets', 'themes'] },
+    { label: text.navOverview, tabs: ['intro', 'projects', 'dashboard', 'sites', 'storyMap'] },
+    { label: text.navWriting, tabs: ['pages', 'editor', 'assets', 'themes', 'messenger'] },
     { label: text.navPublishing, tabs: ['search', 'conditions', 'export'] }
   ];
 
@@ -1078,35 +1251,22 @@ function Sidebar({
           </div>
         ))}
       </nav>
-      <div className="local-card">
-        <strong>
-          <ShieldCheck size={18} /> {text.localFirst}
-        </strong>
-        <span>{text.localFirstCopy}</span>
-        <ul>
-          <li>
-            <CheckCircle2 size={15} /> {text.noNetwork}
-          </li>
-          <li>
-            <CheckCircle2 size={15} /> {text.manualExport}
-          </li>
-        </ul>
-        <button type="button" onClick={() => onSelectTab('export')}>
-          {text.securityAbout}
-        </button>
-      </div>
     </aside>
   );
 }
 
 function getTabCount(project: StudioProject, tab: StudioTab): number | null {
   switch (tab) {
+    case 'sites':
+      return project.sites.length;
     case 'pages':
-      return project.pages.length;
+      return allPages(project).length;
     case 'assets':
       return project.assets.length;
-    case 'flowchart':
-      return project.flowcharts[0]?.nodes.length ?? 0;
+    case 'storyMap':
+      return project.storyMaps[0]?.nodes.length ?? 0;
+    case 'messenger':
+      return project.messengerThreads.length;
     case 'search':
       return project.searchRules.length;
     case 'conditions':
@@ -1136,6 +1296,10 @@ function SystemIntro({ setTab }: { setTab: (tab: StudioTab) => void }): JSX.Elem
               <span key={`${segment}-${index}`}>{segment}</span>
             ))}
           </p>
+          <div className="intro-summary-box">
+            <strong>{text.introWhatTitle}</strong>
+            <span>{text.introWhatCopy}</span>
+          </div>
           <div className="intro-actions">
             <button type="button" className="primary-action" onClick={() => setTab('dashboard')}>
               <LayoutDashboard size={17} /> {text.introOpenDashboard}
@@ -1174,6 +1338,24 @@ function SystemIntro({ setTab }: { setTab: (tab: StudioTab) => void }): JSX.Elem
           </article>
         ))}
       </div>
+
+      <section className="intro-panel intro-workflow-panel">
+        <div className="panel-head">
+          <div>
+            <h2>{text.introWorkflowTitle}</h2>
+            <p>{text.introWorkflowCopy}</p>
+          </div>
+        </div>
+        <ol className="intro-workflow-list">
+          {text.introWorkflowSteps.map((step, index) => (
+            <li key={step.title}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{step.title}</strong>
+              <p>{step.copy}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
 
       <div className="intro-detail-grid">
         <section className="intro-panel">
@@ -1300,7 +1482,7 @@ function ProjectManagementPanel({
                 <span className="project-list-copy">
                   <strong>{item.name}</strong>
                   <small>
-                    {item.pages.length} {text.metricPages} · {text.projectUpdated(formatDate(item.updatedAt))}
+                    {allPages(item).length} {text.metricPages} · {text.projectUpdated(formatDate(item.updatedAt))}
                   </small>
                 </span>
                 {active ? <StatusBadge tone="green">{text.activeProject}</StatusBadge> : <ChevronRight size={17} aria-hidden="true" />}
@@ -1331,27 +1513,31 @@ function ProjectManagementPanel({
 
 function Dashboard({
   project,
+  pageRefs,
   selectedPageId,
   onSelectPage,
   onAddPage,
   setTab
 }: {
   project: StudioProject;
+  pageRefs: ReturnType<typeof allPageRefs>;
   selectedPageId: string;
   onSelectPage: (pageId: string) => void;
   onAddPage: () => void;
   setTab: (tab: StudioTab) => void;
 }): JSX.Element {
   const text = useUiText();
-  const selectedPage = project.pages.find((page) => page.id === selectedPageId) ?? project.pages[0];
-  const published = project.pages.filter((page) => page.status === 'published').length;
-  const draft = project.pages.length - published;
-  const unlockCount = project.pages.reduce((count, page) => count + page.unlockPages.length, 0);
-  const clueCount = project.searchRules.length + project.conditions.length + project.pages.reduce((count, page) => count + page.revealBlocks.length, 0);
+  const pages = pageRefs.map((ref) => ref.page);
+  const selectedRef = pageRefs.find((ref) => ref.page.id === selectedPageId) ?? pageRefs[0];
+  const selectedPage = selectedRef?.page;
+  const published = pages.filter((page) => page.status === 'published').length;
+  const draft = pages.length - published;
+  const unlockCount = pages.reduce((count, page) => count + page.unlockPages.length, 0);
+  const clueCount = project.searchRules.length + project.conditions.length + pages.reduce((count, page) => count + page.revealBlocks.length, 0);
   const checks = [
-    project.pages.every((page) => page.title.trim() && stripHtml(page.bodyHtml).length > 0),
-    project.searchRules.length > 0 || project.conditions.length > 0 || project.pages.some((page) => page.revealBlocks.length > 0 || page.unlockPages.length > 0),
-    project.pages.every((page) => page.path.trim().endsWith('.html')),
+    pages.every((page) => page.title.trim() && stripHtml(page.bodyHtml).length > 0),
+    project.searchRules.length > 0 || project.conditions.length > 0 || pages.some((page) => page.revealBlocks.length > 0 || page.unlockPages.length > 0),
+    pages.every((page) => page.path.trim().endsWith('.html')),
     project.snapshots.length > 0
   ];
   const readiness = Math.round((checks.filter(Boolean).length / checks.length) * 100);
@@ -1359,7 +1545,7 @@ function Dashboard({
   const selectedConditions = selectedPage
     ? project.conditions.filter((condition) => condition.sourcePageId === selectedPage.id || condition.targetPageId === selectedPage.id)
     : [];
-  const flowNodes = project.flowcharts[0]?.nodes ?? [];
+  const storyMapNodes = project.storyMaps[0]?.nodes ?? [];
 
   return (
     <section className="case-board">
@@ -1375,8 +1561,8 @@ function Dashboard({
       </div>
 
       <div className="metric-row">
-        <Metric icon={FileText} label={text.totalPages} value={`${project.pages.length}`} detail={text.metricPages} />
-        <Metric icon={Globe2} label={text.publishablePages} value={`${published}`} detail={`${Math.round((published / Math.max(project.pages.length, 1)) * 100)}%`} />
+        <Metric icon={FileText} label={text.totalPages} value={`${pages.length}`} detail={text.metricPages} />
+        <Metric icon={Globe2} label={text.publishablePages} value={`${published}`} detail={`${Math.round((published / Math.max(pages.length, 1)) * 100)}%`} />
         <Metric icon={LockKeyhole} label={text.secretPages} value={`${draft}`} detail={text.draft} />
         <Metric icon={KeyRound} label={text.clueCount} value={`${clueCount}`} detail={text.searchRules} />
         <Metric icon={Route} label={text.unlockCount} value={`${unlockCount}`} detail={text.conditionsRoutes} />
@@ -1389,7 +1575,7 @@ function Dashboard({
             <div>
               <h2>{text.allPages}</h2>
               <p>
-                {project.pages.length} {text.metricPages}
+                {pages.length} {text.metricPages}
               </p>
             </div>
             <button type="button" onClick={onAddPage}>
@@ -1397,7 +1583,7 @@ function Dashboard({
             </button>
           </div>
           <div className="page-ledger-list">
-            {project.pages.map((page) => (
+            {pageRefs.map(({ site, page }) => (
               <button
                 type="button"
                 key={page.id}
@@ -1407,7 +1593,7 @@ function Dashboard({
                 <span className="drag-handle">{String(page.pageNumber).padStart(2, '0')}</span>
                 <span>
                   <strong>{page.title}</strong>
-                  <small>{page.path}</small>
+                  <small>{site.name} / {page.path}</small>
                 </span>
                 <StatusBadge tone={page.status === 'published' ? 'green' : 'amber'}>{page.status === 'published' ? text.published : text.draft}</StatusBadge>
               </button>
@@ -1421,14 +1607,14 @@ function Dashboard({
               <h2>{text.flowOverview}</h2>
               <p>{text.revealAndUnlock}</p>
             </div>
-            <button type="button" onClick={() => setTab('flowchart')}>
-              <GitBranch size={16} /> {text.tabs.flowchart}
+            <button type="button" onClick={() => setTab('storyMap')}>
+              <GitBranch size={16} /> {text.tabs.storyMap}
             </button>
           </div>
-          {flowNodes.length ? (
+          {storyMapNodes.length ? (
             <ol className="route-stack">
-              {flowNodes.slice(0, 7).map((node, index) => {
-                const linkedPage = project.pages.find((page) => page.id === node.pageId);
+              {storyMapNodes.slice(0, 7).map((node, index) => {
+                const linkedPage = node.pageId ? pageRefs.find((ref) => ref.page.id === node.pageId)?.page : undefined;
                 return (
                   <li key={node.id} className={node.pageId === selectedPage?.id ? 'active' : ''}>
                     <span>{String(index + 1).padStart(2, '0')}</span>
@@ -1465,7 +1651,7 @@ function Dashboard({
                 </div>
                 <div>
                   <dt>{text.theme}</dt>
-                  <dd>{project.themes.find((theme) => theme.id === selectedPage.themeId)?.name ?? text.noPage}</dd>
+                  <dd>{selectedRef?.site.themes.find((theme) => theme.id === selectedPage.themeId)?.name ?? text.noPage}</dd>
                 </div>
                 <div>
                   <dt>{text.updatedAt}</dt>
@@ -1736,8 +1922,65 @@ function formatDate(value: string): string {
   return date.toLocaleDateString();
 }
 
-function PagesPanel(props: {
+function SitesPanel(props: {
   project: StudioProject;
+  selectedSiteId: string;
+  onSelectSite: (siteId: string) => void;
+  onAddSite: () => void;
+  onDuplicateSite: (site: StudioSite) => void | Promise<void>;
+  onDeleteSite: (siteId: string) => void | Promise<void>;
+  onUpdateSite: (siteId: string, patch: Partial<Pick<StudioSite, 'name' | 'slug' | 'pathPrefix'>>) => void;
+}): JSX.Element {
+  const text = useUiText();
+  return (
+    <section className="panel">
+      <div className="section-head">
+        <div>
+          <h2>{text.siteManagementTitle}</h2>
+          <p>{text.siteManagementCopy}</p>
+        </div>
+        <button type="button" onClick={props.onAddSite}>
+          <Plus size={16} /> {text.addSite}
+        </button>
+      </div>
+      <div className="table-list">
+        {props.project.sites.map((site) => (
+          <article key={site.id} className={site.id === props.selectedSiteId ? 'row active' : 'row'}>
+            <button type="button" className="link-button" onClick={() => props.onSelectSite(site.id)}>
+              {site.name}
+            </button>
+            <input value={site.name} aria-label={text.siteName} onChange={(event) => props.onUpdateSite(site.id, { name: event.target.value })} />
+            <input
+              value={site.slug}
+              aria-label={text.siteSlug}
+              onChange={(event) => props.onUpdateSite(site.id, { slug: safeSlug(event.target.value, site.slug) })}
+            />
+            <input
+              value={site.pathPrefix}
+              aria-label={text.sitePathPrefix}
+              onChange={(event) => props.onUpdateSite(site.id, { pathPrefix: event.target.value.replace(/^\/+/, '') })}
+              onBlur={(event) => props.onUpdateSite(site.id, { pathPrefix: normalizeSitePathPrefix(event.target.value, `sites/${site.slug}`) })}
+            />
+            <StatusBadge tone={site.id === props.project.primarySiteId ? 'green' : 'neutral'}>
+              {site.id === props.project.primarySiteId ? text.primarySite : text.projectCount(site.pages.length)}
+            </StatusBadge>
+            <div className="icon-actions">
+              <button type="button" title={text.duplicateSite} onClick={() => void props.onDuplicateSite(site)}>
+                <Copy size={16} />
+              </button>
+              <button type="button" className="danger-action" title={text.deleteSite} disabled={props.project.sites.length <= 1} onClick={() => void props.onDeleteSite(site.id)}>
+                <Trash2 size={16} />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PagesPanel(props: {
+  site: StudioSite;
   selectedPageId: string;
   onAdd: () => void;
   onDuplicate: (page: StudioPage) => void | Promise<void>;
@@ -1750,13 +1993,16 @@ function PagesPanel(props: {
   return (
     <section className="panel">
       <div className="section-head">
-        <h2>{text.tabs.pages}</h2>
+        <div>
+          <h2>{text.tabs.pages}</h2>
+          <p>{text.pagesPanelCopy}</p>
+        </div>
         <button type="button" onClick={props.onAdd}>
           <Plus size={16} /> {text.addPage}
         </button>
       </div>
       <div className="table-list">
-        {props.project.pages.map((page) => (
+        {props.site.pages.map((page) => (
           <article key={page.id} className={page.id === props.selectedPageId ? 'row active' : 'row'}>
             <button type="button" className="link-button" onClick={() => props.onSelect(page.id)}>
               #{page.pageNumber} {page.title}
@@ -1799,6 +2045,7 @@ function PagesPanel(props: {
 
 function EditorPanel(props: {
   project: StudioProject;
+  site: StudioSite;
   page: StudioPage;
   setSelectedPageId: (id: string) => void;
   updatePage: (pageId: string, updater: (page: StudioPage) => StudioPage) => void;
@@ -1812,10 +2059,11 @@ function EditorPanel(props: {
     <section className="editor-grid">
       <aside className="editor-side">
         <h2>{text.tabs.editor}</h2>
+        <p className="field-hint">{text.editorPanelCopy}</p>
         <label>
           {text.page}
           <select value={props.page.id} onChange={(event) => props.setSelectedPageId(event.target.value)}>
-            {props.project.pages.map((page) => (
+            {props.site.pages.map((page) => (
               <option key={page.id} value={page.id}>
                 {page.pageNumber}. {page.title}
               </option>
@@ -1848,7 +2096,7 @@ function EditorPanel(props: {
             value={props.page.themeId ?? ''}
             onChange={(event) => props.updatePage(props.page.id, (page) => ({ ...page, themeId: event.target.value }))}
           >
-            {props.project.themes.map((theme) => (
+            {props.site.themes.map((theme) => (
               <option key={theme.id} value={theme.id}>
                 {theme.name}
               </option>
@@ -1973,7 +2221,10 @@ function AssetsPanel(props: {
   return (
     <section className="panel">
       <div className="section-head">
-        <h2>{text.tabs.assets}</h2>
+        <div>
+          <h2>{text.tabs.assets}</h2>
+          <p>{text.assetsPanelCopy}</p>
+        </div>
         <label className="file-button">
           <Upload size={16} /> {text.uploadAssets}
           <input type="file" multiple onChange={(event) => void props.addAssets(event.currentTarget.files)} />
@@ -2014,27 +2265,28 @@ function AssetsPanel(props: {
 
 function ThemesPanel(props: {
   project: StudioProject;
+  site: StudioSite;
   addTheme: () => StudioTheme;
   updateTheme: (themeId: string, patch: Partial<StudioTheme>) => void;
   updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
 }): JSX.Element {
   const text = useUiText();
-  const [selectedThemeId, setSelectedThemeId] = useState(props.project.themes[0]?.id ?? '');
+  const [selectedThemeId, setSelectedThemeId] = useState(props.site.themes[0]?.id ?? '');
   const selectedTheme = useMemo(
-    () => props.project.themes.find((theme) => theme.id === selectedThemeId) ?? props.project.themes[0],
-    [props.project.themes, selectedThemeId]
+    () => props.site.themes.find((theme) => theme.id === selectedThemeId) ?? props.site.themes[0],
+    [props.site.themes, selectedThemeId]
   );
-  const defaultThemeId = props.project.themes[0]?.id;
+  const defaultThemeId = props.site.themes[0]?.id;
   const themePages = useMemo(() => {
     if (!selectedTheme) return [];
-    return props.project.pages.filter((page) => page.themeId === selectedTheme.id || (!page.themeId && selectedTheme.id === defaultThemeId));
-  }, [defaultThemeId, props.project.pages, selectedTheme]);
+    return props.site.pages.filter((page) => page.themeId === selectedTheme.id || (!page.themeId && selectedTheme.id === defaultThemeId));
+  }, [defaultThemeId, props.site.pages, selectedTheme]);
 
   useEffect(() => {
-    if (!selectedTheme && props.project.themes[0]) {
-      setSelectedThemeId(props.project.themes[0].id);
+    if (!selectedTheme && props.site.themes[0]) {
+      setSelectedThemeId(props.site.themes[0].id);
     }
-  }, [props.project.themes, selectedTheme]);
+  }, [props.site.themes, selectedTheme]);
 
   function handleAddTheme(): void {
     const theme = props.addTheme();
@@ -2045,7 +2297,10 @@ function ThemesPanel(props: {
     return (
       <section className="panel">
         <div className="section-head">
-          <h2>{text.cssThemes}</h2>
+          <div>
+            <h2>{text.cssThemes}</h2>
+            <p>{text.themesPanelCopy}</p>
+          </div>
           <button type="button" onClick={handleAddTheme}>
             <Plus size={16} /> {text.addTheme}
           </button>
@@ -2058,10 +2313,11 @@ function ThemesPanel(props: {
     <section className="editor-grid theme-editor-grid">
       <aside className="editor-side">
         <h2>{text.cssThemes}</h2>
+        <p className="field-hint">{text.themesPanelCopy}</p>
         <label>
           {text.themeSelector}
           <select value={selectedTheme.id} onChange={(event) => setSelectedThemeId(event.target.value)}>
-            {props.project.themes.map((theme) => (
+            {props.site.themes.map((theme) => (
               <option key={theme.id} value={theme.id}>
                 {theme.name}
               </option>
@@ -2075,7 +2331,7 @@ function ThemesPanel(props: {
         <button type="button" onClick={handleAddTheme}>
           <Plus size={16} /> {text.addTheme}
         </button>
-        {props.project.themes.map((theme) => (
+        {props.site.themes.map((theme) => (
           <button
             key={theme.id}
             type="button"
@@ -2148,71 +2404,30 @@ function getThemePreviewHtml(theme: StudioTheme, text: UiText): string {
   return renderThemeDocument(theme.name, body, theme.css);
 }
 
-function FlowchartPanel(props: {
+function StoryMapPanel(props: {
   project: StudioProject;
-  addFlowNode: (flow: StudioFlowchart) => void;
-  addFlowEdge: (flow: StudioFlowchart, sourceId: string, targetId: string) => void;
+  pageRefs: ReturnType<typeof allPageRefs>;
+  addStoryMapNode: (storyMap: StudioStoryMap) => void;
+  addStoryMapEdge: (storyMap: StudioStoryMap, sourceId: string, targetId: string) => void;
   updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
   requestConfirmation: (request: ConfirmationRequest) => Promise<boolean>;
 }): JSX.Element {
   const text = useUiText();
-  const flow = props.project.flowcharts[0];
-  const [selectedFlowNodeId, setSelectedFlowNodeId] = useState(flow.nodes[0]?.id ?? '');
+  const storyMap = props.project.storyMaps[0];
+  const [selectedNodeId, setSelectedNodeId] = useState(storyMap.nodes[0]?.id ?? '');
   const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
   const [edgeDraft, setEdgeDraft] = useState({
-    sourceId: flow.nodes[0]?.id ?? '',
-    targetId: flow.nodes[1]?.id ?? flow.nodes[0]?.id ?? ''
+    sourceId: storyMap.nodes[0]?.id ?? '',
+    targetId: storyMap.nodes[1]?.id ?? storyMap.nodes[0]?.id ?? ''
   });
-  const selectedFlowNode = flow.nodes.find((node) => node.id === selectedFlowNodeId);
-
-  useEffect(() => {
-    setNodePositions((positions) => {
-      const next: Record<string, { x: number; y: number }> = {};
-      for (const node of flow.nodes) {
-        next[node.id] = positions[node.id] ?? { x: node.x, y: node.y };
-      }
-      return next;
-    });
-    if (!flow.nodes.some((node) => node.id === selectedFlowNodeId)) {
-      setSelectedFlowNodeId(flow.nodes[0]?.id ?? '');
-    }
-  }, [flow.nodes, selectedFlowNodeId]);
-
-  useEffect(() => {
-    setEdgeDraft((current) => {
-      const nodeIds = flow.nodes.map((node) => node.id);
-      const sourceId = nodeIds.includes(current.sourceId) ? current.sourceId : nodeIds[0] ?? '';
-      let targetId = nodeIds.includes(current.targetId) ? current.targetId : (nodeIds.find((id) => id !== sourceId) ?? nodeIds[0] ?? '');
-      if (sourceId === targetId && nodeIds.length > 1) {
-        targetId = nodeIds.find((id) => id !== sourceId) ?? targetId;
-      }
-      return sourceId === current.sourceId && targetId === current.targetId ? current : { sourceId, targetId };
-    });
-  }, [flow.nodes]);
-
-  const nodes: Node[] = flow.nodes.map((node) => ({
-    id: node.id,
-    position: nodePositions[node.id] ?? { x: node.x, y: node.y },
-    data: { label: node.label },
-    type: 'default',
-    selected: node.id === selectedFlowNodeId,
-    className: getFlowNodeClassName(node.id)
-  }));
-  const edges: Edge[] = flow.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.label,
-    markerEnd: { type: MarkerType.ArrowClosed },
-    className: 'flow-edge'
-  }));
-  const edgeSourceNode = flow.nodes.find((node) => node.id === edgeDraft.sourceId);
-  const edgeTargetNode = flow.nodes.find((node) => node.id === edgeDraft.targetId);
-  const selectedDraftEdge = flow.edges.find((edge) => edge.source === edgeDraft.sourceId && edge.target === edgeDraft.targetId);
+  const selectedNode = storyMap.nodes.find((node) => node.id === selectedNodeId);
+  const edgeSourceNode = storyMap.nodes.find((node) => node.id === edgeDraft.sourceId);
+  const edgeTargetNode = storyMap.nodes.find((node) => node.id === edgeDraft.targetId);
+  const selectedDraftEdge = storyMap.edges.find((edge) => edge.source === edgeDraft.sourceId && edge.target === edgeDraft.targetId);
   const edgeAlreadyExists = Boolean(selectedDraftEdge);
   const canCreateEdge = Boolean(edgeSourceNode && edgeTargetNode && edgeDraft.sourceId !== edgeDraft.targetId && !edgeAlreadyExists);
   const edgeStatus =
-    flow.nodes.length < 2
+    storyMap.nodes.length < 2
       ? text.edgeNeedsTwoNodes
       : edgeDraft.sourceId === edgeDraft.targetId
         ? text.edgeSelectDifferentNodes
@@ -2221,83 +2436,205 @@ function FlowchartPanel(props: {
           : edgeSourceNode && edgeTargetNode
             ? text.edgeReady(edgeSourceNode.label, edgeTargetNode.label)
             : text.edgeNeedsTwoNodes;
-  function getFlowNodeClassName(nodeId: string): string {
+
+  useEffect(() => {
+    setNodePositions((positions) => {
+      const next: Record<string, { x: number; y: number }> = {};
+      for (const node of storyMap.nodes) {
+        next[node.id] = positions[node.id] ?? { x: node.x, y: node.y };
+      }
+      return next;
+    });
+    if (!storyMap.nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(storyMap.nodes[0]?.id ?? '');
+    }
+  }, [storyMap.nodes, selectedNodeId]);
+
+  useEffect(() => {
+    setEdgeDraft((current) => {
+      const nodeIds = storyMap.nodes.map((node) => node.id);
+      const sourceId = nodeIds.includes(current.sourceId) ? current.sourceId : nodeIds[0] ?? '';
+      let targetId = nodeIds.includes(current.targetId) ? current.targetId : (nodeIds.find((id) => id !== sourceId) ?? nodeIds[0] ?? '');
+      if (sourceId === targetId && nodeIds.length > 1) {
+        targetId = nodeIds.find((id) => id !== sourceId) ?? targetId;
+      }
+      return sourceId === current.sourceId && targetId === current.targetId ? current : { sourceId, targetId };
+    });
+  }, [storyMap.nodes]);
+
+  const nodes: Node[] = storyMap.nodes.map((node) => ({
+    id: node.id,
+    position: nodePositions[node.id] ?? { x: node.x, y: node.y },
+    data: { label: `${node.label} · ${node.type}` },
+    type: 'default',
+    selected: node.id === selectedNodeId,
+    className: getNodeClassName(node.id)
+  }));
+  const edges: Edge[] = storyMap.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    label: `${edge.label} · ${edge.pathRole}`,
+    markerEnd: { type: MarkerType.ArrowClosed },
+    className: `flow-edge path-role-${edge.pathRole}`
+  }));
+
+  function updateStoryMap(updater: (target: StudioStoryMap) => StudioStoryMap): void {
+    props.updateProject((current) => ({
+      ...current,
+      storyMaps: current.storyMaps.map((item) => (item.id === storyMap.id ? updater(item) : item))
+    }));
+  }
+
+  function updateNode(nodeId: string, patch: Partial<StoryMapNode>): void {
+    updateStoryMap((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node))
+    }));
+  }
+
+  function updateEdge(edgeId: string, patch: Partial<StoryMapEdge>): void {
+    updateStoryMap((current) => ({
+      ...current,
+      edges: current.edges.map((edge) => (edge.id === edgeId ? { ...edge, ...patch } : edge))
+    }));
+  }
+
+  function pageRefForTrigger(edge: StoryMapEdge) {
+    const targetNode = storyMap.nodes.find((node) => node.id === edge.target);
+    const sourceNode = storyMap.nodes.find((node) => node.id === edge.source);
+    return props.pageRefs.find((ref) => ref.page.id === targetNode?.pageId) ?? props.pageRefs.find((ref) => ref.page.id === sourceNode?.pageId) ?? props.pageRefs[0];
+  }
+
+  function messengerTarget() {
+    const thread = props.project.messengerThreads[0];
+    return { thread, node: thread?.nodes[0] };
+  }
+
+  function defaultTrigger(edge: StoryMapEdge, type: StoryTrigger['type']): StoryTrigger {
+    const ref = pageRefForTrigger(edge);
+    const reveal = ref?.page.revealBlocks[0];
+    const unlock = ref?.page.unlockPages[0];
+    const searchRule = props.project.searchRules[0];
+    const { thread, node } = messengerTarget();
+    return {
+      id: createId('trigger'),
+      type,
+      siteId: ref?.site.id,
+      pageId: ref?.page.id,
+      revealId: type === 'revealSolved' ? reveal?.id : undefined,
+      unlockId: type === 'unlockSolved' ? unlock?.id : undefined,
+      searchRuleId: type === 'searchSolved' ? searchRule?.id : undefined,
+      threadId: type.startsWith('messenger') ? thread?.id : undefined,
+      nodeId: type.startsWith('messenger') ? node?.id : undefined
+    };
+  }
+
+  function updateTrigger(edge: StoryMapEdge, patch: Partial<StoryTrigger>): void {
+    const trigger = edge.trigger ?? defaultTrigger(edge, (patch.type as StoryTrigger['type'] | undefined) ?? 'pageVisited');
+    updateEdge(edge.id, { trigger: { ...trigger, ...patch } });
+  }
+
+  function updateTriggerPage(edge: StoryMapEdge, pageId: string): void {
+    const ref = props.pageRefs.find((item) => item.page.id === pageId);
+    updateTrigger(edge, { siteId: ref?.site.id, pageId: ref?.page.id });
+  }
+
+  function updateTriggerReveal(edge: StoryMapEdge, revealId: string): void {
+    const ref = props.pageRefs.find((item) => item.page.revealBlocks.some((reveal) => reveal.id === revealId));
+    updateTrigger(edge, { siteId: ref?.site.id, pageId: ref?.page.id, revealId });
+  }
+
+  function updateTriggerUnlock(edge: StoryMapEdge, unlockId: string): void {
+    const ref = props.pageRefs.find((item) => item.page.unlockPages.some((unlock) => unlock.id === unlockId));
+    updateTrigger(edge, { siteId: ref?.site.id, pageId: ref?.page.id, unlockId });
+  }
+
+  function defaultEffect(type: StoryEffect['type']): StoryEffect {
+    const ref = props.pageRefs[0];
+    const { thread, node } = messengerTarget();
+    return {
+      id: createId('effect'),
+      type,
+      flagId: type === 'setFlag' ? 'flag-1' : undefined,
+      siteId: ref?.site.id,
+      pageId: type === 'unlockPage' ? ref?.page.id : undefined,
+      threadId: type.includes('Messenger') ? thread?.id : undefined,
+      nodeId: type.includes('Messenger') ? node?.id : undefined,
+      delayMs: type === 'scheduleMessengerNode' ? 3000 : undefined,
+      count: type === 'setMessengerUnread' ? 1 : undefined
+    };
+  }
+
+  function updateFirstEffect(edge: StoryMapEdge, patch: Partial<StoryEffect>): void {
+    const effect = edge.effects[0] ?? defaultEffect((patch.type as StoryEffect['type'] | undefined) ?? 'setFlag');
+    updateEdge(edge.id, { effects: [{ ...effect, ...patch }, ...edge.effects.slice(1)] });
+  }
+
+  function getNodeClassName(nodeId: string): string {
     return [
       'flow-node',
-      nodeId === selectedFlowNodeId ? 'selected' : '',
+      nodeId === selectedNodeId ? 'selected' : '',
       nodeId === edgeDraft.sourceId ? 'edge-source' : '',
       nodeId === edgeDraft.targetId ? 'edge-target' : ''
     ]
       .filter(Boolean)
       .join(' ');
   }
-  function getFlowRowClassName(nodeId: string): string {
+
+  function getRowClassName(nodeId: string): string {
     return [
       'row',
-      nodeId === selectedFlowNodeId ? 'active' : '',
+      nodeId === selectedNodeId ? 'active' : '',
       nodeId === edgeDraft.sourceId ? 'edge-source' : '',
       nodeId === edgeDraft.targetId ? 'edge-target' : ''
     ]
       .filter(Boolean)
       .join(' ');
   }
-  async function deleteFlowNode(node: FlowNode): Promise<void> {
+
+  async function deleteNode(node: StoryMapNode): Promise<void> {
     const confirmed = await props.requestConfirmation({
       title: text.deleteFlowNode(node.label),
       message: text.deleteFlowNodeConfirm(node.label),
       confirmLabel: text.delete,
       tone: 'danger'
     });
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
     setNodePositions((positions) => {
       const next = { ...positions };
       delete next[node.id];
       return next;
     });
-    props.updateProject((current) => ({
+    updateStoryMap((current) => ({
       ...current,
-      flowcharts: current.flowcharts.map((item) =>
-        item.id === flow.id
-          ? {
-              ...item,
-              nodes: item.nodes.filter((target) => target.id !== node.id),
-              edges: item.edges.filter((edge) => edge.source !== node.id && edge.target !== node.id)
-            }
-          : item
-      )
+      nodes: current.nodes.filter((target) => target.id !== node.id),
+      edges: current.edges.filter((edge) => edge.source !== node.id && edge.target !== node.id)
     }));
   }
+
   async function deleteSelectedEdge(): Promise<void> {
-    if (!selectedDraftEdge || !edgeSourceNode || !edgeTargetNode) {
-      return;
-    }
+    if (!selectedDraftEdge || !edgeSourceNode || !edgeTargetNode) return;
     const confirmed = await props.requestConfirmation({
       title: text.deleteEdge,
       message: text.deleteEdgeConfirm(edgeSourceNode.label, edgeTargetNode.label),
       confirmLabel: text.deleteEdge,
       tone: 'danger'
     });
-    if (!confirmed) {
-      return;
-    }
-    props.updateProject((current) => ({
-      ...current,
-      flowcharts: current.flowcharts.map((item) =>
-        item.id === flow.id ? { ...item, edges: item.edges.filter((edge) => edge.id !== selectedDraftEdge.id) } : item
-      )
-    }));
+    if (!confirmed) return;
+    updateStoryMap((current) => ({ ...current, edges: current.edges.filter((edge) => edge.id !== selectedDraftEdge.id) }));
   }
+
   return (
     <section className="flow-layout">
       <div className="section-head">
         <div>
-          <h2>{text.tabs.flowchart}</h2>
-          <p>{selectedFlowNode ? text.selectedFlowNode(selectedFlowNode.label) : text.noFlowNodeSelected}</p>
+          <h2>{text.tabs.storyMap}</h2>
+          <p>{text.storyMapPanelCopy}</p>
+          <small className="field-hint">{selectedNode ? text.selectedFlowNode(selectedNode.label) : text.noFlowNodeSelected}</small>
         </div>
         <div className="button-row">
-          <button type="button" onClick={() => props.addFlowNode(flow)}>
+          <button type="button" onClick={() => props.addStoryMapNode(storyMap)}>
             <Plus size={16} /> {text.addNode}
           </button>
         </div>
@@ -2309,27 +2646,15 @@ function FlowchartPanel(props: {
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           nodesDraggable
           nodesConnectable={false}
-          onNodeClick={(_, node) => setSelectedFlowNodeId(node.id)}
+          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
           onNodeDrag={(_, node) => {
-            setSelectedFlowNodeId(node.id);
+            setSelectedNodeId(node.id);
             setNodePositions((positions) => ({ ...positions, [node.id]: node.position }));
           }}
           onNodeDragStop={(_, node) => {
-            setSelectedFlowNodeId(node.id);
+            setSelectedNodeId(node.id);
             setNodePositions((positions) => ({ ...positions, [node.id]: node.position }));
-            props.updateProject((current) => ({
-              ...current,
-              flowcharts: current.flowcharts.map((item) =>
-                item.id === flow.id
-                  ? {
-                      ...item,
-                      nodes: item.nodes.map((target) =>
-                        target.id === node.id ? { ...target, x: Math.round(node.position.x), y: Math.round(node.position.y) } : target
-                      )
-                    }
-                  : item
-              )
-            }));
+            updateNode(node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) });
           }}
         >
           <Background />
@@ -2350,11 +2675,11 @@ function FlowchartPanel(props: {
               const sourceId = event.target.value;
               setEdgeDraft((current) => ({
                 sourceId,
-                targetId: current.targetId === sourceId ? (flow.nodes.find((node) => node.id !== sourceId)?.id ?? current.targetId) : current.targetId
+                targetId: current.targetId === sourceId ? (storyMap.nodes.find((node) => node.id !== sourceId)?.id ?? current.targetId) : current.targetId
               }));
             }}
           >
-            {flow.nodes.map((node) => (
+            {storyMap.nodes.map((node) => (
               <option key={node.id} value={node.id}>
                 {node.id === edgeDraft.sourceId ? text.edgeSourceOption(node.label) : node.label}
               </option>
@@ -2363,12 +2688,8 @@ function FlowchartPanel(props: {
         </label>
         <label className="flow-edge-field target">
           <span>{text.edgeTarget}</span>
-          <select
-            value={edgeDraft.targetId}
-            aria-label={text.edgeTarget}
-            onChange={(event) => setEdgeDraft((current) => ({ ...current, targetId: event.target.value }))}
-          >
-            {flow.nodes.map((node) => (
+          <select value={edgeDraft.targetId} aria-label={text.edgeTarget} onChange={(event) => setEdgeDraft((current) => ({ ...current, targetId: event.target.value }))}>
+            {storyMap.nodes.map((node) => (
               <option key={node.id} value={node.id}>
                 {node.id === edgeDraft.targetId ? text.edgeTargetOption(node.label) : node.label}
               </option>
@@ -2376,7 +2697,7 @@ function FlowchartPanel(props: {
           </select>
         </label>
         <div className="flow-edge-actions">
-          <button type="button" disabled={!canCreateEdge} onClick={() => props.addFlowEdge(flow, edgeDraft.sourceId, edgeDraft.targetId)}>
+          <button type="button" disabled={!canCreateEdge} onClick={() => props.addStoryMapEdge(storyMap, edgeDraft.sourceId, edgeDraft.targetId)}>
             <Plus size={16} /> {text.addEdge}
           </button>
           <button type="button" className="danger-action" disabled={!selectedDraftEdge} onClick={() => void deleteSelectedEdge()}>
@@ -2385,49 +2706,430 @@ function FlowchartPanel(props: {
         </div>
       </div>
       <div className="flow-table">
-        {flow.nodes.map((node) => (
-          <div key={node.id} className={getFlowRowClassName(node.id)} onFocus={() => setSelectedFlowNodeId(node.id)}>
-            <input
-              value={node.label}
-              aria-label={text.flowNodeLabel(node.label)}
-              onChange={(event) =>
-                props.updateProject((current) => ({
-                  ...current,
-                  flowcharts: current.flowcharts.map((item) =>
-                    item.id === flow.id
-                      ? { ...item, nodes: item.nodes.map((target) => (target.id === node.id ? { ...target, label: event.target.value } : target)) }
-                      : item
-                  )
-                }))
-              }
-            />
-            <select
-              value={node.pageId ?? ''}
-              aria-label={text.flowNodePage(node.label)}
-              onChange={(event) =>
-                props.updateProject((current) => ({
-                  ...current,
-                  flowcharts: current.flowcharts.map((item) =>
-                    item.id === flow.id
-                      ? { ...item, nodes: item.nodes.map((target) => (target.id === node.id ? { ...target, pageId: event.target.value } : target)) }
-                      : item
-                  )
-                }))
-              }
-            >
-              <option value="">{text.noPage}</option>
-              {props.project.pages.map((page) => (
-                <option key={page.id} value={page.id}>
-                  {page.title}
+        {storyMap.nodes.map((node) => (
+          <div key={node.id} className={getRowClassName(node.id)} onFocus={() => setSelectedNodeId(node.id)}>
+            <input value={node.label} aria-label={text.flowNodeLabel(node.label)} onChange={(event) => updateNode(node.id, { label: event.target.value })} />
+            <select value={node.type} aria-label={text.storyMapNodeType} onChange={(event) => updateNode(node.id, { type: event.target.value as StoryMapNode['type'] })}>
+              {['site', 'page', 'clue', 'discovery', 'action', 'gate', 'external_surface', 'messenger', 'state_change', 'custom'].map((type) => (
+                <option key={type} value={type}>
+                  {type}
                 </option>
               ))}
             </select>
+            <select
+              value={node.pageId ?? ''}
+              aria-label={text.flowNodePage(node.label)}
+              onChange={(event) => {
+                const ref = props.pageRefs.find((item) => item.page.id === event.target.value);
+                updateNode(node.id, {
+                  type: ref ? 'page' : node.type,
+                  siteId: ref?.site.id,
+                  pageId: ref?.page.id,
+                  linkedEntity: ref ? { kind: 'page', siteId: ref.site.id, pageId: ref.page.id, id: ref.page.id } : undefined
+                });
+              }}
+            >
+              <option value="">{text.noPage}</option>
+              {props.pageRefs.map(({ site, page }) => (
+                <option key={page.id} value={page.id}>
+                  {site.name} / {page.title}
+                </option>
+              ))}
+            </select>
+            <input value={node.tags.join(', ')} aria-label={text.storyMapTags} onChange={(event) => updateNode(node.id, { tags: parseList(event.target.value) })} />
+            <textarea value={node.notes} aria-label={text.storyMapNotes} onChange={(event) => updateNode(node.id, { notes: event.target.value })} />
             <div className="icon-actions">
-              <button type="button" className="danger-action" title={text.deleteFlowNode(node.label)} aria-label={text.deleteFlowNode(node.label)} onClick={() => void deleteFlowNode(node)}>
+              <button type="button" className="danger-action" title={text.deleteFlowNode(node.label)} aria-label={text.deleteFlowNode(node.label)} onClick={() => void deleteNode(node)}>
                 <Trash2 size={16} />
               </button>
             </div>
           </div>
+        ))}
+      </div>
+      {storyMap.edges.length > 0 && (
+        <div className="flow-table">
+          {storyMap.edges.map((edge) => {
+            const effect = edge.effects[0];
+            return (
+              <div key={edge.id} className={`row path-role-${edge.pathRole}`}>
+                <input value={edge.label} onChange={(event) => updateEdge(edge.id, { label: event.target.value })} />
+                <select value={edge.action} aria-label={text.storyMapEdgeAction} onChange={(event) => updateEdge(edge.id, { action: event.target.value as StoryMapEdge['action'] })}>
+                  {['read', 'notice', 'search_web', 'search_social', 'enter_url', 'move_site', 'solve_cipher', 'submit_keyword', 'combine_clues', 'wait', 'receive_message', 'custom'].map((action) => (
+                    <option key={action} value={action}>
+                      {action}
+                    </option>
+                  ))}
+                </select>
+                <select value={edge.pathRole} aria-label={text.storyMapPathRole} onChange={(event) => updateEdge(edge.id, { pathRole: event.target.value as StoryMapEdge['pathRole'] })}>
+                  {['intended', 'alternate', 'shortcut_allowed', 'recovery', 'risk'].map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                <input value={edge.fallbackHint ?? ''} placeholder={text.optionalPublicHint} onChange={(event) => updateEdge(edge.id, { fallbackHint: event.target.value })} />
+                <select
+                  value={edge.trigger?.type ?? ''}
+                  aria-label={text.storyMapTriggerType}
+                  onChange={(event) => {
+                    const type = event.target.value as StoryTrigger['type'] | '';
+                    updateEdge(edge.id, { trigger: type ? defaultTrigger(edge, type) : undefined });
+                  }}
+                >
+                  <option value="">{text.storyMapNoTrigger}</option>
+                  {['pageVisited', 'revealSolved', 'unlockSolved', 'searchSolved', 'messengerThreadOpened', 'messengerNodeDelivered', 'messengerNodeReached'].map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                {edge.trigger?.type === 'pageVisited' && (
+                  <select value={edge.trigger.pageId ?? ''} aria-label={text.storyMapTriggerPage} onChange={(event) => updateTriggerPage(edge, event.target.value)}>
+                    {props.pageRefs.map(({ site, page }) => (
+                      <option key={page.id} value={page.id}>
+                        {site.name} / {page.title}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {edge.trigger?.type === 'searchSolved' && (
+                  <select value={edge.trigger.searchRuleId ?? ''} aria-label={text.storyMapTriggerSearch} onChange={(event) => updateTrigger(edge, { searchRuleId: event.target.value })}>
+                    {props.project.searchRules.map((rule) => (
+                      <option key={rule.id} value={rule.id}>
+                        {rule.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {edge.trigger?.type === 'revealSolved' && (
+                  <select value={edge.trigger.revealId ?? ''} aria-label={text.storyMapTriggerReveal} onChange={(event) => updateTriggerReveal(edge, event.target.value)}>
+                    {props.pageRefs.flatMap(({ site, page }) =>
+                      page.revealBlocks.map((reveal) => (
+                        <option key={reveal.id} value={reveal.id}>
+                          {site.name} / {page.title} / {reveal.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                )}
+                {edge.trigger?.type === 'unlockSolved' && (
+                  <select value={edge.trigger.unlockId ?? ''} aria-label={text.storyMapTriggerUnlock} onChange={(event) => updateTriggerUnlock(edge, event.target.value)}>
+                    {props.pageRefs.flatMap(({ site, page }) =>
+                      page.unlockPages.map((unlock) => (
+                        <option key={unlock.id} value={unlock.id}>
+                          {site.name} / {page.title} / {unlock.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                )}
+                {edge.trigger?.type?.startsWith('messenger') && (
+                  <>
+                    <select value={edge.trigger.threadId ?? ''} aria-label={text.storyMapEffectThread} onChange={(event) => updateTrigger(edge, { threadId: event.target.value })}>
+                      {props.project.messengerThreads.map((thread) => (
+                        <option key={thread.id} value={thread.id}>
+                          {thread.title}
+                        </option>
+                      ))}
+                    </select>
+                    <select value={edge.trigger.nodeId ?? ''} aria-label={text.storyMapEffectNode} onChange={(event) => updateTrigger(edge, { nodeId: event.target.value })}>
+                      {props.project.messengerThreads
+                        .find((thread) => thread.id === edge.trigger?.threadId)
+                        ?.nodes.map((node) => (
+                          <option key={node.id} value={node.id}>
+                            {node.body || node.kind}
+                          </option>
+                        ))}
+                    </select>
+                  </>
+                )}
+                <select
+                  value={effect?.type ?? ''}
+                  aria-label={text.storyMapEffectType}
+                  onChange={(event) => {
+                    const type = event.target.value as StoryEffect['type'] | '';
+                    updateEdge(edge.id, { effects: type ? [defaultEffect(type), ...edge.effects.slice(1)] : edge.effects.slice(1) });
+                  }}
+                >
+                  <option value="">{text.storyMapNoEffect}</option>
+                  {['setFlag', 'unlockPage', 'deliverMessengerNode', 'scheduleMessengerNode', 'setMessengerUnread', 'jumpMessengerNode'].map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                {effect?.type === 'setFlag' && (
+                  <input value={effect.flagId ?? ''} aria-label={text.storyMapEffectFlag} onChange={(event) => updateFirstEffect(edge, { flagId: event.target.value })} />
+                )}
+                {effect?.type === 'unlockPage' && (
+                  <select value={effect.pageId ?? ''} aria-label={text.storyMapEffectPage} onChange={(event) => {
+                    const ref = props.pageRefs.find((item) => item.page.id === event.target.value);
+                    updateFirstEffect(edge, { siteId: ref?.site.id, pageId: ref?.page.id });
+                  }}>
+                    {props.pageRefs.map(({ site, page }) => (
+                      <option key={page.id} value={page.id}>
+                        {site.name} / {page.title}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {effect?.type?.includes('Messenger') && (
+                  <>
+                    <select value={effect.threadId ?? ''} aria-label={text.storyMapEffectThread} onChange={(event) => updateFirstEffect(edge, { threadId: event.target.value })}>
+                      {props.project.messengerThreads.map((thread) => (
+                        <option key={thread.id} value={thread.id}>
+                          {thread.title}
+                        </option>
+                      ))}
+                    </select>
+                    <select value={effect.nodeId ?? ''} aria-label={text.storyMapEffectNode} onChange={(event) => updateFirstEffect(edge, { nodeId: event.target.value })}>
+                      {props.project.messengerThreads
+                        .find((thread) => thread.id === effect.threadId)
+                        ?.nodes.map((node) => (
+                          <option key={node.id} value={node.id}>
+                            {node.body || node.kind}
+                          </option>
+                        ))}
+                    </select>
+                  </>
+                )}
+                {effect?.type === 'scheduleMessengerNode' && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={effect.delayMs ?? 0}
+                    aria-label={text.storyMapEffectDelay}
+                    onChange={(event) => updateFirstEffect(edge, { delayMs: Number(event.target.value) })}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MessengerPanel(props: {
+  project: StudioProject;
+  updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
+}): JSX.Element {
+  const text = useUiText();
+  function addThread(): void {
+    const participantId = createId('participant');
+    const thread: MessengerThread = {
+      id: createId('thread'),
+      title: `${text.messengerThreads} ${props.project.messengerThreads.length + 1}`,
+      participants: [{ id: participantId, name: 'Unknown Contact', role: 'character' }],
+      nodes: [
+        {
+          id: createId('message'),
+          senderId: participantId,
+          kind: 'text',
+          body: 'Did you find it?',
+          choices: [],
+          matchers: [],
+          effects: []
+        }
+      ]
+    };
+    props.updateProject((current) => ({ ...current, messengerThreads: [...current.messengerThreads, thread] }));
+  }
+
+  function updateThread(threadId: string, patch: Partial<MessengerThread>): void {
+    props.updateProject((current) => ({
+      ...current,
+      messengerThreads: current.messengerThreads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread))
+    }));
+  }
+
+  function updateNode(threadId: string, nodeId: string, patch: Partial<MessengerNode>): void {
+    props.updateProject((current) => ({
+      ...current,
+      messengerThreads: current.messengerThreads.map((thread) =>
+        thread.id === threadId
+          ? {
+              ...thread,
+              nodes: thread.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node))
+            }
+          : thread
+      )
+    }));
+  }
+
+  function addMessage(thread: MessengerThread): void {
+    const senderId = thread.participants[0]?.id ?? createId('participant');
+    const node: MessengerNode = {
+      id: createId('message'),
+      senderId,
+      kind: 'text',
+      body: '',
+      choices: [],
+      matchers: [],
+      effects: []
+    };
+    updateThread(thread.id, { nodes: [...thread.nodes, node] });
+  }
+
+  function defaultChoice(thread: MessengerThread) {
+    return {
+      id: createId('choice'),
+      label: 'Continue',
+      targetNodeId: thread.nodes[0]?.id,
+      effects: []
+    };
+  }
+
+  function defaultMatcher(thread: MessengerThread) {
+    return {
+      id: createId('match'),
+      label: 'Answer',
+      terms: [],
+      mode: 'exact' as MatchMode,
+      targetNodeId: thread.nodes[0]?.id,
+      effects: []
+    };
+  }
+
+  function updateNodeKind(thread: MessengerThread, node: MessengerNode, kind: MessengerNode['kind']): void {
+    updateNode(thread.id, node.id, {
+      kind,
+      choices: kind === 'choice' || kind === 'delay' ? (node.choices.length ? node.choices : [defaultChoice(thread)]) : node.choices,
+      matchers: kind === 'input' ? (node.matchers.length ? node.matchers : [defaultMatcher(thread)]) : node.matchers,
+      delayMs: kind === 'delay' ? (node.delayMs ?? 3000) : node.delayMs
+    });
+  }
+
+  function updateFirstChoice(thread: MessengerThread, node: MessengerNode, patch: Partial<MessengerNode['choices'][number]>): void {
+    const choice = node.choices[0] ?? defaultChoice(thread);
+    updateNode(thread.id, node.id, { choices: [{ ...choice, ...patch }, ...node.choices.slice(1)] });
+  }
+
+  function updateFirstMatcher(thread: MessengerThread, node: MessengerNode, patch: Partial<MessengerNode['matchers'][number]>): void {
+    const matcher = node.matchers[0] ?? defaultMatcher(thread);
+    updateNode(thread.id, node.id, { matchers: [{ ...matcher, ...patch }, ...node.matchers.slice(1)] });
+  }
+
+  return (
+    <section className="panel">
+      <div className="section-head">
+        <div>
+          <h2>{text.messengerThreads}</h2>
+          <p>{text.messengerPanelCopy}</p>
+        </div>
+        <button type="button" onClick={addThread}>
+          <Plus size={16} /> {text.addThread}
+        </button>
+      </div>
+      <div className="rule-grid">
+        {props.project.messengerThreads.map((thread) => (
+          <article key={thread.id} className="rule-editor">
+            <input value={thread.title} onChange={(event) => updateThread(thread.id, { title: event.target.value })} />
+            <button type="button" onClick={() => addMessage(thread)}>
+              <Plus size={16} /> {text.addMessage}
+            </button>
+            {thread.nodes.map((node) => (
+              <div key={node.id} className="stack">
+                <select value={node.kind} onChange={(event) => updateNodeKind(thread, node, event.target.value as MessengerNode['kind'])}>
+                  {['text', 'choice', 'input', 'delay', 'system'].map((kind) => (
+                    <option key={kind} value={kind}>
+                      {kind}
+                    </option>
+                  ))}
+                </select>
+                <textarea value={node.body} aria-label={text.messageBody} onChange={(event) => updateNode(thread.id, node.id, { body: event.target.value })} />
+                {(node.kind === 'choice' || node.kind === 'delay') && (
+                  <div className="inline-grid">
+                    {node.kind === 'choice' && (
+                      <input
+                        value={node.choices[0]?.label ?? ''}
+                        aria-label={text.messengerChoiceLabel}
+                        onChange={(event) => updateFirstChoice(thread, node, { label: event.target.value })}
+                      />
+                    )}
+                    <select
+                      value={node.choices[0]?.targetNodeId ?? ''}
+                      aria-label={text.messengerChoiceTarget}
+                      onChange={(event) => updateFirstChoice(thread, node, { targetNodeId: event.target.value })}
+                    >
+                      {thread.nodes.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.body || target.kind}
+                        </option>
+                      ))}
+                    </select>
+                    {node.kind === 'delay' && (
+                      <input
+                        type="number"
+                        min={0}
+                        value={node.delayMs ?? 0}
+                        aria-label={text.messengerDelayMs}
+                        onChange={(event) => updateNode(thread.id, node.id, { delayMs: Number(event.target.value) })}
+                      />
+                    )}
+                  </div>
+                )}
+                {node.kind === 'input' && (
+                  <div className="inline-grid">
+                    <textarea
+                      value={textareaList(node.matchers[0]?.terms ?? [])}
+                      aria-label={text.messengerInputTerms}
+                      onChange={(event) => updateFirstMatcher(thread, node, { terms: parseList(event.target.value) })}
+                    />
+                    <select value={node.matchers[0]?.mode ?? 'exact'} onChange={(event) => updateFirstMatcher(thread, node, { mode: event.target.value as MatchMode })}>
+                      <option value="exact">{text.exactMatch}</option>
+                      <option value="contains">{text.containsMatch}</option>
+                    </select>
+                    <select
+                      value={node.matchers[0]?.targetNodeId ?? ''}
+                      aria-label={text.messengerChoiceTarget}
+                      onChange={(event) => updateFirstMatcher(thread, node, { targetNodeId: event.target.value })}
+                    >
+                      {thread.nodes.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.body || target.kind}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="button-row">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateNode(thread.id, node.id, {
+                        protectedMessage: node.protectedMessage
+                          ? undefined
+                          : { prompt: text.keyDefault, answerAliases: [], secretBody: '', failureMessage: text.genericFailure }
+                      })
+                    }
+                  >
+                    <KeyRound size={16} /> {node.protectedMessage ? text.messengerRemoveProtected : text.messengerAddProtected}
+                  </button>
+                </div>
+                {node.protectedMessage && (
+                  <div className="inline-grid">
+                    <input
+                      value={node.protectedMessage.prompt}
+                      aria-label={text.messengerProtectedPrompt}
+                      onChange={(event) => updateNode(thread.id, node.id, { protectedMessage: { ...node.protectedMessage!, prompt: event.target.value } })}
+                    />
+                    <textarea
+                      value={textareaList(node.protectedMessage.answerAliases)}
+                      aria-label={text.messengerProtectedAnswers}
+                      onChange={(event) => updateNode(thread.id, node.id, { protectedMessage: { ...node.protectedMessage!, answerAliases: parseList(event.target.value) } })}
+                    />
+                    <textarea
+                      value={node.protectedMessage.secretBody}
+                      aria-label={text.messengerProtectedSecret}
+                      onChange={(event) => updateNode(thread.id, node.id, { protectedMessage: { ...node.protectedMessage!, secretBody: event.target.value } })}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </article>
         ))}
       </div>
     </section>
@@ -2436,6 +3138,7 @@ function FlowchartPanel(props: {
 
 function SearchPanel(props: {
   project: StudioProject;
+  pageRefs: ReturnType<typeof allPageRefs>;
   addSearchRule: () => void;
   updateSearchRule: (ruleId: string, patch: Partial<SearchRule>) => void;
   updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
@@ -2444,7 +3147,10 @@ function SearchPanel(props: {
   return (
     <section className="panel">
       <div className="section-head">
-        <h2>{text.encryptedSearch}</h2>
+        <div>
+          <h2>{text.encryptedSearch}</h2>
+          <p>{text.searchPanelCopy}</p>
+        </div>
         <button type="button" onClick={props.addSearchRule}>
           <Plus size={16} /> {text.addRule}
         </button>
@@ -2458,9 +3164,9 @@ function SearchPanel(props: {
               <option value="contains">{text.containsMatch}</option>
             </select>
             <select value={rule.targetPageId} onChange={(event) => props.updateSearchRule(rule.id, { targetPageId: event.target.value })}>
-              {props.project.pages.map((page) => (
+              {props.pageRefs.map(({ site, page }) => (
                 <option key={page.id} value={page.id}>
-                  {page.title}
+                  {site.name} / {page.title}
                 </option>
               ))}
             </select>
@@ -2476,6 +3182,7 @@ function SearchPanel(props: {
 
 function ConditionsPanel(props: {
   project: StudioProject;
+  pageRefs: ReturnType<typeof allPageRefs>;
   addCondition: () => void;
   updateCondition: (conditionId: string, patch: Partial<StudioCondition>) => void;
   updateProject: (updater: (draft: StudioProject) => StudioProject) => void;
@@ -2484,7 +3191,10 @@ function ConditionsPanel(props: {
   return (
     <section className="panel">
       <div className="section-head">
-        <h2>{text.conditionsRoutes}</h2>
+        <div>
+          <h2>{text.conditionsRoutes}</h2>
+          <p>{text.conditionsPanelCopy}</p>
+        </div>
         <button type="button" onClick={props.addCondition}>
           <Plus size={16} /> {text.addRoute}
         </button>
@@ -2494,16 +3204,16 @@ function ConditionsPanel(props: {
           <article key={condition.id} className="rule-editor">
             <input value={condition.label} onChange={(event) => props.updateCondition(condition.id, { label: event.target.value })} />
             <select value={condition.sourcePageId} onChange={(event) => props.updateCondition(condition.id, { sourcePageId: event.target.value })}>
-              {props.project.pages.map((page) => (
+              {props.pageRefs.map(({ site, page }) => (
                 <option key={page.id} value={page.id}>
-                  {text.fromPage(page.title)}
+                  {text.fromPage(`${site.name} / ${page.title}`)}
                 </option>
               ))}
             </select>
             <select value={condition.targetPageId} onChange={(event) => props.updateCondition(condition.id, { targetPageId: event.target.value })}>
-              {props.project.pages.map((page) => (
+              {props.pageRefs.map(({ site, page }) => (
                 <option key={page.id} value={page.id}>
-                  {text.toPage(page.title)}
+                  {text.toPage(`${site.name} / ${page.title}`)}
                 </option>
               ))}
             </select>
@@ -2518,17 +3228,26 @@ function ConditionsPanel(props: {
 
 function ExportPanel(props: {
   project: StudioProject;
+  selectedSite: StudioSite;
   exportState: string;
   exportBackup: () => Promise<void>;
   exportSourceBackup: () => Promise<void>;
   importBackup: (file?: File) => Promise<void>;
   importSource: (file?: File) => Promise<void>;
   importYacho: (file?: File) => Promise<void>;
-  exportPublic: () => Promise<void>;
+  updateStoryNamespace: (storyNamespace: string) => void;
+  exportPublic: (siteId?: string) => Promise<void>;
 }): JSX.Element {
   const text = useUiText();
   return (
     <section className="export-grid">
+      <div className="notice-panel export-intro-panel">
+        <div>
+          <span className="section-kicker">{text.tabs.export}</span>
+          <h2>{text.tabs.export}</h2>
+          <p>{text.exportPanelCopy}</p>
+        </div>
+      </div>
       <div className="export-panel">
         <h2>{text.projectBackup}</h2>
         <p>{text.projectBackupCopy}</p>
@@ -2560,10 +3279,26 @@ function ExportPanel(props: {
         </p>
       </div>
       <div className="export-panel">
+        <h2>{text.storyStatePanelTitle}</h2>
+        <p>{text.storyStatePanelCopy}</p>
+        <label>
+          {text.storyNamespace}
+          <input
+            value={props.project.storyNamespace}
+            onChange={(event) => props.updateStoryNamespace(safeSlug(event.target.value, props.project.id))}
+            aria-label={text.storyNamespace}
+          />
+        </label>
+        <p className="field-hint">{text.storyNamespaceCopy}</p>
+      </div>
+      <div className="export-panel">
         <h2>{text.publicStaticSite}</h2>
         <p>{text.publicStaticSiteCopy}</p>
         <button type="button" onClick={() => void props.exportPublic()}>
-          <ShieldCheck size={16} /> {text.exportPublicZip}
+          <ShieldCheck size={16} /> {text.exportProjectPublicZip}
+        </button>
+        <button type="button" onClick={() => void props.exportPublic(props.selectedSite.id)}>
+          <Globe2 size={16} /> {text.exportSelectedSitePublicZip(props.selectedSite.name)}
         </button>
       </div>
       <div className="export-panel">

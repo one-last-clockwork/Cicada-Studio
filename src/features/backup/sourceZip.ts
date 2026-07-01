@@ -1,21 +1,28 @@
 import JSZip from 'jszip';
 import type {
-  FlowEdge,
   ImportedScriptMetadata,
+  LegacyStudioFlowchart,
   MatchMode,
   RevealBlock,
   SearchRule,
+  StoryMapEdge,
+  StoryMapEdgeAction,
+  StoryMapNode,
+  StoryMapNodeType,
+  StoryPathRole,
+  StoryPrerequisiteMode,
   StudioAsset,
   StudioCondition,
-  StudioFlowchart,
   StudioPage,
   StudioProject,
+  StudioSite,
+  StudioStoryMap,
   StudioTheme,
   UnlockPage
 } from '../../types/project';
 import { bytesToBase64 } from '../../lib/crypto/encoding';
 import { hasTraversalPath, normalizeAssetPath, normalizePublicPath, safeSlug } from '../../lib/path-safety/pathSafety';
-import { createDefaultFlowchart, createDefaultTheme, createId, nowIso } from '../../lib/projects/createProject';
+import { createDefaultStoryMap, createDefaultStoryState, createDefaultTheme, createId, nowIso } from '../../lib/projects/createProject';
 import { dataUrlToBytes } from '../../lib/zip/blob';
 import type {
   SourceZipAssetMetadata,
@@ -29,7 +36,7 @@ import type {
 } from './sourceZipTypes';
 
 const SOURCE_MANIFEST_KIND = 'cicada-studio-project-source';
-const SOURCE_MANIFEST_VERSION = 1;
+const SOURCE_MANIFEST_VERSION = 2;
 const DEFAULT_SITE_ID = 'default';
 const DEFAULT_SITE_ROOT = 'sites/default';
 
@@ -121,7 +128,7 @@ function sourceFileNameForScript(script: ImportedScriptMetadata, used: Set<strin
   return uniqueAssetFileName(script.path || script.name || fallback, used, fallback);
 }
 
-function manifestForProject(project: StudioProject): SourceZipManifest {
+function manifestForProject(project: StudioProject, sites: SourceZipSite[]): SourceZipManifest {
   return {
     kind: SOURCE_MANIFEST_KIND,
     version: SOURCE_MANIFEST_VERSION,
@@ -132,14 +139,24 @@ function manifestForProject(project: StudioProject): SourceZipManifest {
       name: project.name,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
-      scriptPreviewEnabled: project.scriptPreviewEnabled
+      scriptPreviewEnabled: project.scriptPreviewEnabled,
+      storyNamespace: project.storyNamespace,
+      primarySiteId: project.primarySiteId
     },
-    site: {
-      id: DEFAULT_SITE_ID,
-      slug: DEFAULT_SITE_ID,
-      name: 'Default Site'
-    }
+    sites
   };
+}
+
+function sourceRootForSite(site: StudioSite, index: number, used: Set<string>): string {
+  const base = safeSlug(site.slug || site.name || site.id, index === 0 ? DEFAULT_SITE_ID : `site-${index + 1}`);
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return `sites/${candidate}`;
 }
 
 function uniqueSourceSlug(page: StudioPage, index: number, used: Set<string>): string {
@@ -166,16 +183,16 @@ function uniqueSourcePublicPath(path: string | undefined, fallback: string, used
   return candidate;
 }
 
-function themesForSourceExport(project: StudioProject): StudioTheme[] {
-  return project.themes.length ? project.themes : [createDefaultTheme()];
+function themesForSourceExport(site: StudioSite): StudioTheme[] {
+  return site.themes.length ? site.themes : [createDefaultTheme()];
 }
 
-function pagesForSourceExport(project: StudioProject, themes: StudioTheme[]): StudioPage[] {
+function pagesForSourceExport(site: StudioSite, themes: StudioTheme[]): StudioPage[] {
   const usedSlugs = new Set<string>();
   const usedPaths = new Set<string>();
   const themeIds = new Set(themes.map((theme) => theme.id));
   const defaultThemeId = themes[0]?.id;
-  return project.pages.map((page, index) => {
+  return site.pages.map((page, index) => {
     const slug = uniqueSourceSlug(page, index, usedSlugs);
     const fallbackPath = index === 0 ? 'index.html' : `${slug}.html`;
     const path = uniqueSourcePublicPath(page.path, fallbackPath, usedPaths);
@@ -189,79 +206,101 @@ function pagesForSourceExport(project: StudioProject, themes: StudioTheme[]): St
   });
 }
 
-function flowchartsForSourceExport(project: StudioProject, pages: StudioPage[]): StudioFlowchart[] {
-  const pageIds = new Set(pages.map((page) => page.id));
-  if (!project.flowcharts.length) {
-    return pages[0] ? [createDefaultFlowchart(pages[0])] : [];
+function storyMapsForSourceExport(project: StudioProject, pageIds: Set<string>): StudioStoryMap[] {
+  if (!project.storyMaps.length) {
+    const firstSite = project.sites[0];
+    return firstSite ? [createDefaultStoryMap(firstSite)] : [];
   }
-  return project.flowcharts.map((flowchart) => {
-    const nodes = flowchart.nodes.map((node) => (node.pageId && !pageIds.has(node.pageId) ? { ...node, pageId: undefined } : node));
+  return project.storyMaps.map((storyMap) => {
+    const nodes = storyMap.nodes.map((node) => {
+      const linkedEntity =
+        node.linkedEntity?.kind === 'page' && node.linkedEntity.pageId && !pageIds.has(node.linkedEntity.pageId)
+          ? undefined
+          : node.linkedEntity;
+      return {
+        ...node,
+        linkedEntity,
+        pageId: node.pageId && pageIds.has(node.pageId) ? node.pageId : undefined
+      };
+    });
     const nodeIds = new Set(nodes.map((node) => node.id));
     return {
-      ...flowchart,
+      ...storyMap,
       nodes,
-      edges: flowchart.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+      edges: storyMap.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
     };
   });
 }
 
 export async function exportProjectSourceZip(project: StudioProject): Promise<Blob> {
   const zip = new JSZip();
-  const themes = themesForSourceExport(project);
-  const pages = pagesForSourceExport(project, themes);
-  const flowcharts = flowchartsForSourceExport(project, pages);
-  const usedPageNames = new Set<string>();
-  const usedThemeNames = new Set<string>();
+  const sourceSites: SourceZipSite[] = [];
+  const usedSiteRoots = new Set<string>();
+  const pageIds = new Set<string>();
   const usedAssetNames = new Set<string>();
   const usedScriptNames = new Set<string>();
-  const pageFiles: string[] = [];
-  const themeFiles: string[] = [];
 
-  zip.file('cicada.project.json', stableJson(manifestForProject(project)));
+  for (const [siteIndex, site] of project.sites.entries()) {
+    const siteRoot = sourceRootForSite(site, siteIndex, usedSiteRoots);
+    const themes = themesForSourceExport(site);
+    const pages = pagesForSourceExport(site, themes);
+    const usedPageNames = new Set<string>();
+    const usedThemeNames = new Set<string>();
+    const pageFiles: string[] = [];
+    const themeFiles: string[] = [];
 
-  for (const [index, page] of pages.entries()) {
-    const fileBase = makeUniqueName(pageBase(page, index), usedPageNames);
-    const bodyFile = `${DEFAULT_SITE_ROOT}/pages/${fileBase}.html`;
-    const metadataFile = `${DEFAULT_SITE_ROOT}/pages/${fileBase}.json`;
-    const metadata = {
-      allowScripts: page.allowScripts,
-      bodyFile,
-      id: page.id,
-      memo: page.memo,
-      pageNumber: page.pageNumber,
-      path: page.path,
-      revealBlocks: page.revealBlocks,
-      slug: page.slug,
-      status: page.status,
-      themeId: page.themeId,
-      title: page.title,
-      unlockPages: page.unlockPages
+    for (const [index, page] of pages.entries()) {
+      pageIds.add(page.id);
+      const fileBase = makeUniqueName(pageBase(page, index), usedPageNames);
+      const bodyFile = `${siteRoot}/pages/${fileBase}.html`;
+      const metadataFile = `${siteRoot}/pages/${fileBase}.json`;
+      const metadata = {
+        allowScripts: page.allowScripts,
+        bodyFile,
+        id: page.id,
+        memo: page.memo,
+        pageNumber: page.pageNumber,
+        path: page.path,
+        revealBlocks: page.revealBlocks,
+        slug: page.slug,
+        status: page.status,
+        themeId: page.themeId,
+        title: page.title,
+        unlockPages: page.unlockPages
+      };
+      zip.file(bodyFile, page.bodyHtml);
+      zip.file(metadataFile, stableJson(metadata));
+      pageFiles.push(metadataFile);
+    }
+
+    for (const [index, theme] of themes.entries()) {
+      const fileBase = makeUniqueName(themeBase(theme, index), usedThemeNames);
+      const cssFile = `${siteRoot}/themes/${fileBase}.css`;
+      const metadataFile = `${siteRoot}/themes/${fileBase}.json`;
+      zip.file(cssFile, theme.css);
+      zip.file(metadataFile, stableJson({ cssFile, id: theme.id, name: theme.name }));
+      themeFiles.push(metadataFile);
+    }
+
+    const sourceSite: SourceZipSite = {
+      id: site.id,
+      slug: site.slug,
+      name: site.name,
+      pathPrefix: site.pathPrefix,
+      root: siteRoot,
+      pageFiles,
+      themeFiles
     };
-    zip.file(bodyFile, page.bodyHtml);
-    zip.file(metadataFile, stableJson(metadata));
-    pageFiles.push(metadataFile);
+    sourceSites.push(sourceSite);
+    zip.file(`${siteRoot}/site.json`, stableJson(sourceSite));
   }
 
-  for (const [index, theme] of themes.entries()) {
-    const fileBase = makeUniqueName(themeBase(theme, index), usedThemeNames);
-    const cssFile = `${DEFAULT_SITE_ROOT}/themes/${fileBase}.css`;
-    const metadataFile = `${DEFAULT_SITE_ROOT}/themes/${fileBase}.json`;
-    zip.file(cssFile, theme.css);
-    zip.file(metadataFile, stableJson({ cssFile, id: theme.id, name: theme.name }));
-    themeFiles.push(metadataFile);
-  }
-
-  const site: SourceZipSite = {
-    id: DEFAULT_SITE_ID,
-    slug: DEFAULT_SITE_ID,
-    name: 'Default Site',
-    pageFiles,
-    themeFiles
-  };
-  zip.file(`${DEFAULT_SITE_ROOT}/site.json`, stableJson(site));
-  zip.file('story/flowcharts.json', stableJson(flowcharts));
+  zip.file('cicada.project.json', stableJson(manifestForProject(project, sourceSites)));
+  zip.file('story/story-maps.json', stableJson(storyMapsForSourceExport(project, pageIds)));
+  zip.file('story/story-state.json', stableJson(project.storyState));
   zip.file('search/rules.json', stableJson(project.searchRules));
   zip.file('conditions.json', stableJson(project.conditions));
+  zip.file('messenger/threads.json', stableJson(project.messengerThreads));
 
   const assetManifest: SourceZipAssetMetadata[] = [];
   for (const [index, asset] of project.assets.entries()) {
@@ -338,7 +377,7 @@ function metadataFiles(site: SourceZipSite | undefined, zip: JSZip, type: 'pages
   if (Array.isArray(listed) && listed.length) {
     return listed.filter((path) => typeof path === 'string').sort();
   }
-  return fileListFromZip(zip, `${DEFAULT_SITE_ROOT}/${type}/`, '.json');
+  return fileListFromZip(zip, `${site?.root ?? DEFAULT_SITE_ROOT}/${type}/`, '.json');
 }
 
 function parseRevealBlocks(value: unknown): RevealBlock[] {
@@ -519,49 +558,199 @@ function repairPageThemeReferences(pages: StudioPage[], themes: StudioTheme[], r
   });
 }
 
-function parseFlowcharts(value: unknown, pageIds: Set<string>, result: SourceZipDryRunResult, firstPage: StudioPage): StudioFlowchart[] {
+const STORY_MAP_NODE_TYPES: StoryMapNodeType[] = [
+  'project',
+  'site',
+  'page',
+  'clue',
+  'discovery',
+  'action',
+  'gate',
+  'internal_site',
+  'external_surface',
+  'messenger',
+  'state_change',
+  'custom'
+];
+
+const STORY_MAP_EDGE_ACTIONS: StoryMapEdgeAction[] = [
+  'read',
+  'notice',
+  'search_web',
+  'search_social',
+  'enter_url',
+  'move_site',
+  'solve_cipher',
+  'submit_keyword',
+  'combine_clues',
+  'wait',
+  'receive_message',
+  'custom'
+];
+
+const STORY_PATH_ROLES: StoryPathRole[] = ['intended', 'alternate', 'shortcut_allowed', 'recovery', 'risk'];
+const STORY_PREREQUISITE_MODES: StoryPrerequisiteMode[] = ['permissive', 'strict'];
+
+function optionalStringArray(value: unknown): string[] {
+  return arrayValue(value).map(String).filter(Boolean);
+}
+
+function pageSiteId(pageSites: Map<string, string>, pageId: string | undefined): string | undefined {
+  return pageId ? pageSites.get(pageId) : undefined;
+}
+
+function normalizeStoryMapNodeType(value: unknown): StoryMapNodeType {
+  return STORY_MAP_NODE_TYPES.includes(value as StoryMapNodeType) ? (value as StoryMapNodeType) : 'custom';
+}
+
+function normalizeStoryMapEdgeAction(value: unknown): StoryMapEdgeAction {
+  return STORY_MAP_EDGE_ACTIONS.includes(value as StoryMapEdgeAction) ? (value as StoryMapEdgeAction) : 'custom';
+}
+
+function normalizeStoryPathRole(value: unknown): StoryPathRole {
+  return STORY_PATH_ROLES.includes(value as StoryPathRole) ? (value as StoryPathRole) : 'intended';
+}
+
+function normalizeStoryPrerequisiteMode(value: unknown): StoryPrerequisiteMode {
+  return STORY_PREREQUISITE_MODES.includes(value as StoryPrerequisiteMode) ? (value as StoryPrerequisiteMode) : 'permissive';
+}
+
+function parseStoryMaps(
+  value: unknown,
+  pageIds: Set<string>,
+  pageSites: Map<string, string>,
+  result: SourceZipDryRunResult,
+  fallbackSite: StudioSite
+): StudioStoryMap[] {
   const source = Array.isArray(value) ? value : [];
   if (!source.length) {
-    addIssue(result.repairs, 'repair', 'No flowcharts were found, so a default flowchart was created.', 'story/flowcharts.json');
-    return [createDefaultFlowchart(firstPage)];
+    addIssue(result.repairs, 'repair', 'No Story Maps were found, so a default Story Map was created.', 'story/story-maps.json');
+    return [createDefaultStoryMap(fallbackSite)];
   }
-  return source.map((item, flowIndex) => {
+  return source.map((item, storyMapIndex) => {
     const record = isRecord(item) ? item : {};
     const rawNodes = arrayValue(record.nodes);
-    const nodes = rawNodes.map((node, nodeIndex) => {
+    const nodes: StoryMapNode[] = rawNodes.map((node, nodeIndex) => {
       const nodeRecord = isRecord(node) ? node : {};
-      const pageId = optionalString(nodeRecord.pageId);
-      if (pageId && !pageIds.has(pageId)) {
-        addIssue(result.warnings, 'warning', `Flowchart node "${optionalString(nodeRecord.label) ?? nodeIndex + 1}" references a missing page.`, 'story/flowcharts.json');
+      const rawPageId = optionalString(nodeRecord.pageId);
+      const pageId = rawPageId && pageIds.has(rawPageId) ? rawPageId : undefined;
+      if (rawPageId && !pageId) {
+        addIssue(result.warnings, 'warning', `Story Map node "${optionalString(nodeRecord.label) ?? nodeIndex + 1}" references a missing page.`, 'story/story-maps.json');
       }
       return {
         id: optionalString(nodeRecord.id) ?? createId('node'),
         label: optionalString(nodeRecord.label) ?? `Node ${nodeIndex + 1}`,
-        pageId: pageId && pageIds.has(pageId) ? pageId : undefined,
+        type: normalizeStoryMapNodeType(nodeRecord.type),
+        linkedEntity: isRecord(nodeRecord.linkedEntity) ? (nodeRecord.linkedEntity as unknown as StoryMapNode['linkedEntity']) : undefined,
+        siteId: optionalString(nodeRecord.siteId) ?? pageSiteId(pageSites, pageId),
+        pageId,
+        externalUrl: optionalString(nodeRecord.externalUrl),
+        notes: optionalString(nodeRecord.notes) ?? '',
+        tags: optionalStringArray(nodeRecord.tags),
         x: optionalNumber(nodeRecord.x) ?? 80 + nodeIndex * 120,
         y: optionalNumber(nodeRecord.y) ?? 80
       };
     });
     const nodeIds = new Set(nodes.map((node) => node.id));
-    const edges: FlowEdge[] = [];
+    const edges: StoryMapEdge[] = [];
     for (const [edgeIndex, edge] of arrayValue(record.edges).entries()) {
       const edgeRecord = isRecord(edge) ? edge : {};
       const source = optionalString(edgeRecord.source);
       const target = optionalString(edgeRecord.target);
       if (!source || !target || !nodeIds.has(source) || !nodeIds.has(target)) {
-        addIssue(result.repairs, 'repair', 'Flowchart edge with a missing node reference was removed.', 'story/flowcharts.json');
+        addIssue(result.repairs, 'repair', 'Story Map edge with a missing node reference was removed.', 'story/story-maps.json');
         continue;
       }
       edges.push({
         id: optionalString(edgeRecord.id) ?? createId('edge'),
         source,
         target,
-        label: optionalString(edgeRecord.label) ?? `Edge ${edgeIndex + 1}`
+        label: optionalString(edgeRecord.label) ?? `Edge ${edgeIndex + 1}`,
+        action: normalizeStoryMapEdgeAction(edgeRecord.action),
+        pathRole: normalizeStoryPathRole(edgeRecord.pathRole),
+        prerequisiteMode: normalizeStoryPrerequisiteMode(edgeRecord.prerequisiteMode),
+        difficulty:
+          edgeRecord.difficulty === 'low' || edgeRecord.difficulty === 'medium' || edgeRecord.difficulty === 'high'
+            ? edgeRecord.difficulty
+            : undefined,
+        expectedInput: optionalString(edgeRecord.expectedInput),
+        fallbackHint: optionalString(edgeRecord.fallbackHint),
+        notes: optionalString(edgeRecord.notes) ?? '',
+        tags: optionalStringArray(edgeRecord.tags),
+        trigger: isRecord(edgeRecord.trigger) ? (edgeRecord.trigger as unknown as StoryMapEdge['trigger']) : undefined,
+        effects: Array.isArray(edgeRecord.effects) ? (edgeRecord.effects as StoryMapEdge['effects']) : []
       });
     }
     return {
-      id: optionalString(record.id) ?? createId('flow'),
-      name: optionalString(record.name) ?? `Flowchart ${flowIndex + 1}`,
+      id: optionalString(record.id) ?? createId('story-map'),
+      name: optionalString(record.name) ?? `Story Map ${storyMapIndex + 1}`,
+      nodes,
+      edges
+    };
+  });
+}
+
+function migrateLegacyFlowcharts(
+  value: unknown,
+  pageIds: Set<string>,
+  pageSites: Map<string, string>,
+  result: SourceZipDryRunResult,
+  fallbackSite: StudioSite
+): StudioStoryMap[] {
+  const source = Array.isArray(value) ? (value as LegacyStudioFlowchart[]) : [];
+  if (!source.length) {
+    return parseStoryMaps(undefined, pageIds, pageSites, result, fallbackSite);
+  }
+  addIssue(result.repairs, 'repair', 'Legacy flowcharts were migrated to Story Maps.', 'story/flowcharts.json');
+  return source.map((item, flowIndex) => {
+    const record: Record<string, unknown> = isRecord(item) ? (item as unknown as Record<string, unknown>) : {};
+    const rawNodes = arrayValue(record.nodes);
+    const nodes: StoryMapNode[] = rawNodes.map((node, nodeIndex) => {
+      const nodeRecord = isRecord(node) ? node : {};
+      const rawPageId = optionalString(nodeRecord.pageId);
+      const pageId = rawPageId && pageIds.has(rawPageId) ? rawPageId : undefined;
+      if (rawPageId && !pageId) {
+        addIssue(result.warnings, 'warning', `Story Map node "${optionalString(nodeRecord.label) ?? nodeIndex + 1}" references a missing page.`, 'story/flowcharts.json');
+      }
+      return {
+        id: optionalString(nodeRecord.id) ?? createId('node'),
+        label: optionalString(nodeRecord.label) ?? `Node ${nodeIndex + 1}`,
+        type: pageId ? 'page' : 'discovery',
+        linkedEntity: pageId ? { kind: 'page', id: pageId, pageId, siteId: pageSiteId(pageSites, pageId) } : undefined,
+        siteId: pageSiteId(pageSites, pageId),
+        pageId,
+        notes: '',
+        tags: [],
+        x: optionalNumber(nodeRecord.x) ?? 80 + nodeIndex * 120,
+        y: optionalNumber(nodeRecord.y) ?? 80
+      };
+    });
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const edges: StoryMapEdge[] = [];
+    for (const [edgeIndex, edge] of arrayValue(record.edges).entries()) {
+      const edgeRecord = isRecord(edge) ? edge : {};
+      const source = optionalString(edgeRecord.source);
+      const target = optionalString(edgeRecord.target);
+      if (!source || !target || !nodeIds.has(source) || !nodeIds.has(target)) {
+        addIssue(result.repairs, 'repair', 'Story Map edge with a missing node reference was removed.', 'story/flowcharts.json');
+        continue;
+      }
+      edges.push({
+        id: optionalString(edgeRecord.id) ?? createId('edge'),
+        source,
+        target,
+        label: optionalString(edgeRecord.label) ?? `Edge ${edgeIndex + 1}`,
+        action: 'read',
+        pathRole: 'intended',
+        prerequisiteMode: 'permissive',
+        notes: '',
+        tags: [],
+        effects: []
+      });
+    }
+    return {
+      id: optionalString(record.id) ?? createId('story-map'),
+      name: optionalString(record.name)?.replace(/flowchart/gi, 'Story Map') ?? `Story Map ${flowIndex + 1}`,
       nodes,
       edges
     };
@@ -682,6 +871,14 @@ async function importScripts(zip: JSZip, result: SourceZipDryRunResult): Promise
   return scripts;
 }
 
+function parseMessengerThreads(value: unknown): StudioProject['messengerThreads'] {
+  return Array.isArray(value) ? (value as StudioProject['messengerThreads']) : [];
+}
+
+function parseStoryState(value: unknown): StudioProject['storyState'] {
+  return isRecord(value) ? (value as unknown as StudioProject['storyState']) : createDefaultStoryState();
+}
+
 function emptyDryRunResult(): SourceZipDryRunResult {
   return {
     ok: false,
@@ -696,7 +893,7 @@ function parsedManifestProject(manifest: unknown, result: SourceZipDryRunResult)
     addIssue(result.errors, 'error', 'Source Zip manifest must be an object.', 'cicada.project.json');
     return undefined;
   }
-  if (manifest.kind !== SOURCE_MANIFEST_KIND || manifest.version !== SOURCE_MANIFEST_VERSION) {
+  if (manifest.kind !== SOURCE_MANIFEST_KIND || (manifest.version !== 1 && manifest.version !== 2)) {
     addIssue(result.errors, 'error', 'Zip is not a supported Cicada Studio Source Zip.', 'cicada.project.json');
     return undefined;
   }
@@ -708,13 +905,73 @@ function parsedManifestProject(manifest: unknown, result: SourceZipDryRunResult)
     addIssue(result.repairs, 'repair', `Missing project id was generated as ${id}.`, 'cicada.project.json');
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     name: optionalString(project.name) ?? 'Imported Source Project',
     createdAt: optionalString(project.createdAt) ?? now,
     updatedAt: optionalString(project.updatedAt) ?? now,
-    scriptPreviewEnabled: optionalBoolean(project.scriptPreviewEnabled) ?? false
+    scriptPreviewEnabled: optionalBoolean(project.scriptPreviewEnabled) ?? false,
+    storyNamespace: optionalString(project.storyNamespace),
+    primarySiteId: optionalString(project.primarySiteId)
   };
+}
+
+function normalizeSitePathPrefix(value: unknown): string {
+  const raw = optionalString(value)?.replace(/^\/+|\/+$/g, '') ?? '';
+  if (!raw) {
+    return '';
+  }
+  return normalizePublicPath(`${raw}/index.html`, 'index.html').replace(/\/?index\.html$/i, '');
+}
+
+async function sourceSitesFromManifest(zip: JSZip, manifest: unknown, result: SourceZipDryRunResult): Promise<SourceZipSite[]> {
+  if (!isRecord(manifest)) {
+    return [];
+  }
+  const rawSites = Array.isArray(manifest.sites) ? manifest.sites : [];
+  if (rawSites.length) {
+    const sites: SourceZipSite[] = [];
+    const ids = new Set<string>();
+    for (const [index, rawSite] of rawSites.entries()) {
+      const record = isRecord(rawSite) ? rawSite : {};
+      const id = optionalString(record.id) ?? (index === 0 ? DEFAULT_SITE_ID : createId('site'));
+      if (ids.has(id)) {
+        addIssue(result.errors, 'error', `Duplicate site id "${id}" is ambiguous.`, 'cicada.project.json');
+        continue;
+      }
+      ids.add(id);
+      const slug = safeSlug(optionalString(record.slug) ?? optionalString(record.name) ?? id, index === 0 ? DEFAULT_SITE_ID : `site-${index + 1}`);
+      const root = optionalString(record.root) ?? `sites/${slug}`;
+      const siteJson = await readOptionalJsonFile<SourceZipSite>(zip, `${root}/site.json`, result);
+      sites.push({
+        id,
+        slug,
+        name: optionalString(record.name) ?? siteJson?.name ?? `Site ${index + 1}`,
+        pathPrefix: normalizeSitePathPrefix(record.pathPrefix ?? siteJson?.pathPrefix),
+        root,
+        pageFiles: Array.isArray(record.pageFiles) ? record.pageFiles.map(String) : siteJson?.pageFiles ?? [],
+        themeFiles: Array.isArray(record.themeFiles) ? record.themeFiles.map(String) : siteJson?.themeFiles ?? []
+      });
+    }
+    return sites;
+  }
+
+  const legacySite = isRecord(manifest.site) ? manifest.site : {};
+  const site = await readOptionalJsonFile<SourceZipSite>(zip, `${DEFAULT_SITE_ROOT}/site.json`, result);
+  if (!site) {
+    addIssue(result.warnings, 'warning', 'Default site metadata is missing; files will be discovered from directories.', `${DEFAULT_SITE_ROOT}/site.json`);
+  }
+  return [
+    {
+      id: optionalString(legacySite.id) ?? site?.id ?? DEFAULT_SITE_ID,
+      slug: safeSlug(optionalString(legacySite.slug) ?? site?.slug ?? DEFAULT_SITE_ID, DEFAULT_SITE_ID),
+      name: optionalString(legacySite.name) ?? site?.name ?? 'Default Site',
+      pathPrefix: normalizeSitePathPrefix(site?.pathPrefix),
+      root: DEFAULT_SITE_ROOT,
+      pageFiles: site?.pageFiles ?? [],
+      themeFiles: site?.themeFiles ?? []
+    }
+  ];
 }
 
 async function loadZip(input: Blob | ArrayBuffer, result: SourceZipDryRunResult): Promise<JSZip | undefined> {
@@ -746,39 +1003,72 @@ export async function dryRunImportProjectSourceZip(input: Blob | ArrayBuffer): P
 
   const manifest = await readJsonFile<unknown>(zip, 'cicada.project.json', result);
   const projectMetadata = parsedManifestProject(manifest, result);
-  const site = await readOptionalJsonFile<SourceZipSite>(zip, `${DEFAULT_SITE_ROOT}/site.json`, result);
-  if (!site) {
-    addIssue(result.warnings, 'warning', 'Default site metadata is missing; files will be discovered from directories.', `${DEFAULT_SITE_ROOT}/site.json`);
-  }
   if (!projectMetadata) {
     return result;
   }
 
-  const themes = await importThemes(zip, site, result);
-  let pages = await importPages(zip, site, result);
-  pages = repairPageThemeReferences(pages, themes, result);
-  if (!pages.length) {
+  const sourceSites = await sourceSitesFromManifest(zip, manifest, result);
+  const sites: StudioSite[] = [];
+  const pageIds = new Set<string>();
+  const pageSites = new Map<string, string>();
+  const siteIds = new Set<string>();
+  for (const sourceSite of sourceSites) {
+    if (siteIds.has(sourceSite.id)) {
+      addIssue(result.errors, 'error', `Duplicate site id "${sourceSite.id}" is ambiguous.`, sourceSite.root);
+      continue;
+    }
+    siteIds.add(sourceSite.id);
+    const themes = await importThemes(zip, sourceSite, result);
+    let pages = await importPages(zip, sourceSite, result);
+    pages = repairPageThemeReferences(pages, themes, result);
+    for (const page of pages) {
+      if (pageIds.has(page.id)) {
+        addIssue(result.errors, 'error', `Duplicate page id "${page.id}" is ambiguous across sites.`, sourceSite.root);
+        continue;
+      }
+      pageIds.add(page.id);
+      pageSites.set(page.id, sourceSite.id);
+    }
+    sites.push({
+      id: sourceSite.id,
+      name: sourceSite.name,
+      slug: sourceSite.slug,
+      pathPrefix: sourceSite.pathPrefix ?? '',
+      pages,
+      themes
+    });
+  }
+
+  if (!sites.length || !Array.from(sites.values()).some((site) => site.pages.length)) {
     return result;
   }
-  const pageIds = new Set(pages.map((page) => page.id));
 
-  const flowchartJson = await readOptionalJsonFile<unknown>(zip, 'story/flowcharts.json', result);
+  const storyMapsJson = await readOptionalJsonFile<unknown>(zip, 'story/story-maps.json', result);
+  const legacyFlowchartJson = storyMapsJson ? undefined : await readOptionalJsonFile<unknown>(zip, 'story/flowcharts.json', result);
+  const storyStateJson = await readOptionalJsonFile<unknown>(zip, 'story/story-state.json', result);
   const searchJson = await readOptionalJsonFile<unknown>(zip, 'search/rules.json', result);
   const conditionsJson = await readOptionalJsonFile<unknown>(zip, 'conditions.json', result);
+  const messengerJson = await readOptionalJsonFile<unknown>(zip, 'messenger/threads.json', result);
+  const fallbackSite = sites[0];
 
   const project: StudioProject = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: projectMetadata.id,
     name: projectMetadata.name,
     createdAt: projectMetadata.createdAt,
     updatedAt: projectMetadata.updatedAt,
     scriptPreviewEnabled: projectMetadata.scriptPreviewEnabled,
-    pages,
+    storyNamespace: projectMetadata.storyNamespace || safeSlug(projectMetadata.id || projectMetadata.name, 'story'),
+    primarySiteId: projectMetadata.primarySiteId && siteIds.has(projectMetadata.primarySiteId) ? projectMetadata.primarySiteId : fallbackSite.id,
+    sites,
     assets: await importAssets(zip, result),
-    themes,
-    flowcharts: parseFlowcharts(flowchartJson, pageIds, result, pages[0]),
+    storyMaps: storyMapsJson
+      ? parseStoryMaps(storyMapsJson, pageIds, pageSites, result, fallbackSite)
+      : migrateLegacyFlowcharts(legacyFlowchartJson, pageIds, pageSites, result, fallbackSite),
     searchRules: parseSearchRules(searchJson, pageIds, result),
     conditions: parseConditions(conditionsJson, pageIds, result),
+    messengerThreads: parseMessengerThreads(messengerJson),
+    storyState: parseStoryState(storyStateJson),
     importedScripts: await importScripts(zip, result),
     snapshots: []
   };

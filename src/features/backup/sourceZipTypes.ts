@@ -18,27 +18,32 @@ export interface SourceZipDryRunResult {
 
 export interface SourceZipManifest {
   kind: 'cicada-studio-project-source';
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
   project: {
-    schemaVersion: 1;
+    schemaVersion: 1 | 2;
     id: string;
     name: string;
     createdAt: string;
     updatedAt: string;
     scriptPreviewEnabled: boolean;
+    storyNamespace?: string;
+    primarySiteId?: string;
   };
-  site: {
-    id: 'default';
-    slug: 'default';
+  site?: {
+    id: string;
+    slug: string;
     name: string;
   };
+  sites?: SourceZipSite[];
 }
 
 export interface SourceZipSite {
-  id: 'default';
-  slug: 'default';
+  id: string;
+  slug: string;
   name: string;
+  pathPrefix?: string;
+  root?: string;
   pageFiles: string[];
   themeFiles: string[];
 }
@@ -81,4 +86,3 @@ export interface SourceZipScriptMetadata {
   sourceFile?: string;
   metadata?: unknown;
 }
-

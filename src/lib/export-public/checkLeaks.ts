@@ -3,6 +3,7 @@ import type { ExportCheckResult, ExportFileSummary, LeakageFinding } from '../..
 import type { StudioProject } from '../../types/project';
 import { PUBLIC_EXPORT_LICENSE_FILENAME } from '../../public-runtime/outputLicense';
 import { hasTraversalPath } from '../path-safety/pathSafety';
+import { allPages } from '../projects/projectAccess';
 
 const FORBIDDEN_FILENAMES = new Set(['structure.json', 'flowchart.json', 'project.json']);
 const STATIC_FORBIDDEN_TEXT = ['author-only', 'internal condition', 'plain answer'];
@@ -20,7 +21,7 @@ function addFinding(findings: LeakageFinding[], path: string, reason: string): v
 
 function collectForbiddenProjectText(project: StudioProject): string[] {
   const values = new Set<string>();
-  for (const page of project.pages) {
+  for (const page of allPages(project)) {
     if (page.status !== 'published') {
       values.add(page.title);
       values.add(page.bodyHtml);
@@ -58,8 +59,35 @@ function collectForbiddenProjectText(project: StudioProject): string[] {
       values.add(JSON.stringify(script.metadata));
     }
   }
-  for (const flow of project.flowcharts) {
-    values.add(flow.name);
+  for (const storyMap of project.storyMaps) {
+    values.add(storyMap.name);
+    for (const node of storyMap.nodes) {
+      values.add(node.notes);
+      for (const tag of node.tags) {
+        values.add(tag);
+      }
+    }
+    for (const edge of storyMap.edges) {
+      values.add(edge.notes);
+      values.add(edge.expectedInput ?? '');
+      values.add(edge.fallbackHint ?? '');
+      for (const tag of edge.tags) {
+        values.add(tag);
+      }
+    }
+  }
+  for (const thread of project.messengerThreads) {
+    for (const node of thread.nodes) {
+      values.add(node.protectedMessage?.secretBody ?? '');
+      for (const answer of node.protectedMessage?.answerAliases ?? []) {
+        values.add(answer);
+      }
+      for (const matcher of node.matchers) {
+        for (const term of matcher.terms) {
+          values.add(term);
+        }
+      }
+    }
   }
   return [...values].map((value) => value.trim()).filter((value) => value.length >= 4);
 }

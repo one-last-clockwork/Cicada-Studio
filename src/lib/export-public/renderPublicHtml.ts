@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Generated public-export copies of the document shell/widgets emitted here are available under the MIT terms in LICENCE-OUTPUT.md.
 
-import type { PublicRuntimePayload, StudioPage, StudioProject, UnlockPage } from '../../types/project';
+import type { PublicRuntimePayload, StudioPage, StudioProject, StudioTheme, UnlockPage } from '../../types/project';
 import { canRunScriptPreview } from '../../features/preview/previewPolicy';
 import { escapeHtml, escapeStyleText, sanitizeHtml } from '../html/sanitize';
 
@@ -43,11 +43,11 @@ export function renderUnlockWidget(publicId: string, unlock: UnlockPage): string
 export function renderPublicPageDocument(
   project: StudioProject,
   page: StudioPage,
+  theme: StudioTheme | undefined,
   bodyHtml: string,
   payload: PublicRuntimePayload,
   runtimePath = 'runtime.js'
 ): string {
-  const theme = project.themes.find((item) => item.id === page.themeId) ?? project.themes[0];
   const body = canRunScriptPreview(project, page) ? bodyHtml : sanitizeHtml(bodyHtml);
   const payloadJson = JSON.stringify(payload).replace(/</g, '\\u003c');
   return `<!doctype html>

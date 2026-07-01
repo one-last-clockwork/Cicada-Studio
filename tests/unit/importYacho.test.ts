@@ -21,14 +21,14 @@ describe('YACHO import', () => {
 
     const project = await importYachoProjectZip(await zip.generateAsync({ type: 'arraybuffer' }));
     expect(project.name).toBe('Imported Case');
-    expect(project.pages[0].bodyHtml).toContain('<h1>Start</h1>');
-    expect(project.pages[0].bodyHtml).not.toContain('<script>');
-    expect(project.pages[0].allowScripts).toBe(false);
+    expect(project.sites[0].pages[0].bodyHtml).toContain('<h1>Start</h1>');
+    expect(project.sites[0].pages[0].bodyHtml).not.toContain('<script>');
+    expect(project.sites[0].pages[0].allowScripts).toBe(false);
     expect(project.scriptPreviewEnabled).toBe(false);
     expect(project.assets).toHaveLength(1);
-    expect(project.themes[0]).toMatchObject({ name: 'imported', css: 'body { color: #123456; }' });
+    expect(project.sites[0].themes[0]).toMatchObject({ name: 'imported', css: 'body { color: #123456; }' });
     expect(project.importedScripts).toHaveLength(2);
     expect(project.importedScripts.every((script) => script.enabled === false)).toBe(true);
-    expect(project.flowcharts[0].nodes[0].label).toBe('Start');
+    expect(project.storyMaps[0].nodes[0].label).toBe('Start');
   });
 });

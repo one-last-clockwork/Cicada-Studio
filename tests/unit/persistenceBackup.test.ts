@@ -17,9 +17,9 @@ describe('IndexedDB project lifecycle and backup', () => {
 
   it('roundtrips author data through project backup zip', async () => {
     const project = createProject('Backup Test');
-    project.pages[0].memo = 'author-only memo';
+    project.sites[0].pages[0].memo = 'author-only memo';
     const blob = await exportProjectBackupZip(project);
     const restored = await importProjectBackupZip(blob);
-    expect(restored.pages[0].memo).toBe('author-only memo');
+    expect(restored.sites[0].pages[0].memo).toBe('author-only memo');
   });
 });

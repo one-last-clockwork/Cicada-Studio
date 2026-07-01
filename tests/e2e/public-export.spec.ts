@@ -42,8 +42,9 @@ async function servePublicZip(blob: Blob): Promise<{ baseUrl: string; close: () 
 test('public export zip works from a static server without plaintext secrets', async ({ page }) => {
   test.setTimeout(45_000);
   const project = createProject('Public Smoke');
-  project.pages[0].bodyHtml = '<main><h1>Public Smoke</h1><div data-search-widget="default"></div></main>';
-  project.pages[0].revealBlocks.push({
+  const projectPage = project.sites[0].pages[0];
+  projectPage.bodyHtml = '<main><h1>Public Smoke</h1><div data-search-widget="default"></div></main>';
+  projectPage.revealBlocks.push({
     id: createId('reveal'),
     label: 'Reveal',
     prompt: 'Phrase',
@@ -57,7 +58,7 @@ test('public export zip works from a static server without plaintext secrets', a
     terms: ['open sesame'],
     aliases: [],
     mode: 'exact',
-    targetPageId: project.pages[0].id,
+    targetPageId: projectPage.id,
     hint: '',
     failureMessage: 'no'
   });

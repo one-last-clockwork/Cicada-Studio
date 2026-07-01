@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildPublicExportZip } from '../../src/lib/export-public/publicExport';
 import { checkPublicExportZip } from '../../src/lib/export-public/checkLeaks';
 import { decryptText, tryDecryptText } from '../../src/lib/crypto/browserCrypto';
-import { createId, createPage, createProject } from '../../src/lib/projects/createProject';
+import { createDefaultMessengerThread, createDefaultSite, createId, createPage, createProject } from '../../src/lib/projects/createProject';
 import { PUBLIC_EXPORT_LICENSE_FILENAME } from '../../src/public-runtime/outputLicense';
 import type { PublicRuntimePayload } from '../../src/types/project';
 
@@ -20,7 +20,8 @@ async function firstDecrypted(secret: string, entries: Array<{ salt: string; iv:
 describe('public export', () => {
   it('does not treat the generated output license notice as leaked project text', async () => {
     const project = createProject('License Notice');
-    project.pages[0].revealBlocks.push({
+    const page = project.sites[0].pages[0];
+    page.revealBlocks.push({
       id: createId('reveal'),
       label: 'License phrase',
       prompt: 'Phrase',
@@ -33,11 +34,12 @@ describe('public export', () => {
     expect(check.ok).toBe(true);
   });
 
-  it('exports a static site without drafts, flowcharts, answers, or plaintext encrypted payloads', async () => {
+  it('exports a static site without drafts, Story Maps, answers, or plaintext encrypted payloads', async () => {
     const project = createProject('Leakage Test');
-    project.themes[0].css = 'body{color:#111}</style><script>window.__css_breakout="theme leak"</script><style>';
-    project.pages[0] = {
-      ...project.pages[0],
+    const site = project.sites[0];
+    site.themes[0].css = 'body{color:#111}</style><script>window.__css_breakout="theme leak"</script><style>';
+    site.pages[0] = {
+      ...site.pages[0],
       bodyHtml: '<main><h1>Visible Page</h1><div data-search-widget="default"></div></main>',
       revealBlocks: [
         {
@@ -61,7 +63,8 @@ describe('public export', () => {
         }
       ]
     };
-    project.pages.push(
+    const firstPage = site.pages[0];
+    site.pages.push(
       createPage({
         title: 'Draft Only',
         status: 'draft',
@@ -76,15 +79,15 @@ describe('public export', () => {
       terms: ['blue door'],
       aliases: ['青いドア'],
       mode: 'contains',
-      targetPageId: project.pages[0].id,
+      targetPageId: firstPage.id,
       hint: 'Look for a door.',
       failureMessage: 'no'
     });
     project.conditions.push({
       id: createId('condition'),
       label: 'Internal route',
-      sourcePageId: project.pages[0].id,
-      targetPageId: project.pages[0].id,
+      sourcePageId: firstPage.id,
+      targetPageId: firstPage.id,
       publicHint: 'public',
       internalNote: 'internal condition leak marker'
     });
@@ -95,7 +98,7 @@ describe('public export', () => {
       enabled: false,
       source: 'legacy script leak marker'
     });
-    project.flowcharts[0].name = 'flowchart leak marker';
+    project.storyMaps[0].name = 'story map leak marker';
     project.assets.push(
       {
         id: createId('asset'),
@@ -114,7 +117,7 @@ describe('public export', () => {
         bytes: 17
       }
     );
-    project.pages[0].bodyHtml += '<a href="assets/public-note.txt">public note</a>';
+    firstPage.bodyHtml += '<a href="assets/public-note.txt">public note</a>';
 
     const blob = await buildPublicExportZip(project);
     const check = await checkPublicExportZip(blob, project);
@@ -142,7 +145,7 @@ describe('public export', () => {
     await expect(decryptText('long archive passphrase', payload.unlock[0])).resolves.not.toContain('javascript:');
     await expect(firstDecrypted('長い合言葉', payload.unlock)).resolves.toContain('classified archive payload');
     await expect(firstDecrypted('青いドア', payload.search)).resolves.toContain('index.html');
-    project.pages[0].path = 'nested/deep/index.html';
+    firstPage.path = 'nested/deep/index.html';
     const nestedBlob = await buildPublicExportZip(project);
     const nestedZip = await JSZip.loadAsync(nestedBlob);
     const nestedHtml = await nestedZip.file('nested/deep/index.html')?.async('text');
@@ -162,11 +165,127 @@ describe('public export', () => {
     expect(combined).not.toContain('classified archive payload');
     expect(combined).not.toContain('blue door');
     expect(combined).not.toContain('draft body leak marker');
-    expect(combined).not.toContain('flowchart leak marker');
+    expect(combined).not.toContain('story map leak marker');
     expect(combined).not.toContain('internal condition leak marker');
     expect(combined).not.toContain('legacy script leak marker');
     expect(combined).not.toContain('private asset leak marker');
     expect(combined).not.toContain('<script>window.__css_breakout');
     expect(combined).not.toContain('</style><script>');
+  });
+
+  it('exports multi-site layouts and encrypted protected messenger messages', async () => {
+    const project = createProject('Multi Site StoryState');
+    const primarySite = project.sites[0];
+    primarySite.pages[0].bodyHtml = '<main><h1>Primary Site</h1></main>';
+    const archiveSite = createDefaultSite({
+      name: 'Archive Site',
+      slug: 'archive',
+      pathPrefix: 'sites/archive'
+    });
+    archiveSite.pages[0].title = 'Archive Index';
+    archiveSite.pages[0].bodyHtml = '<main><h1>Archive Site</h1></main>';
+    project.sites.push(archiveSite);
+    const strictSearchId = createId('search');
+    project.searchRules.push({
+      id: strictSearchId,
+      label: 'Strict Search',
+      terms: ['strict search answer'],
+      aliases: [],
+      mode: 'exact',
+      targetPageId: primarySite.pages[0].id,
+      hint: '',
+      failureMessage: 'no'
+    });
+    const pageNode = project.storyMaps[0].nodes.find((node) => node.pageId === primarySite.pages[0].id);
+    const strictTargetNode = {
+      id: createId('node'),
+      label: 'Strict Target',
+      type: 'state_change' as const,
+      notes: '',
+      tags: [],
+      x: 520,
+      y: 140
+    };
+    project.storyMaps[0].nodes.push(strictTargetNode);
+    project.storyMaps[0].edges.push({
+      id: createId('edge'),
+      source: pageNode?.id ?? project.storyMaps[0].nodes[0].id,
+      target: strictTargetNode.id,
+      label: 'Strict route',
+      action: 'submit_keyword',
+      pathRole: 'intended',
+      prerequisiteMode: 'strict',
+      notes: '',
+      tags: [],
+      trigger: {
+        id: createId('trigger'),
+        type: 'searchSolved',
+        searchRuleId: strictSearchId
+      },
+      effects: [{ id: createId('effect'), type: 'setFlag', flagId: 'strict-route' }]
+    });
+
+    const thread = createDefaultMessengerThread();
+    thread.nodes[0].body = 'Locked note';
+    thread.nodes[0].protectedMessage = {
+      prompt: 'Passphrase',
+      answerAliases: ['messenger secret'],
+      secretBody: '<p>protected messenger body</p>',
+      failureMessage: 'no'
+    };
+    thread.nodes.push({
+      id: createId('message'),
+      senderId: thread.participants[0].id,
+      kind: 'input',
+      body: 'Say the phrase',
+      choices: [],
+      matchers: [
+        {
+          id: createId('match'),
+          label: 'Messenger answer',
+          terms: ['messenger input answer'],
+          mode: 'exact',
+          targetNodeId: thread.nodes[0].id,
+          effects: []
+        }
+      ],
+      effects: []
+    });
+    project.messengerThreads.push(thread);
+
+    const blob = await buildPublicExportZip(project);
+    const check = await checkPublicExportZip(blob, project);
+    expect(check.ok).toBe(true);
+    const zip = await JSZip.loadAsync(blob);
+    expect(Object.keys(zip.files)).toContain('index.html');
+    expect(Object.keys(zip.files)).toContain('sites/archive/index.html');
+
+    const html = await zip.file('index.html')?.async('text');
+    const payloadJson = html?.match(/<script type="application\/json" id="arg-payload">([\s\S]*?)<\/script>/)?.[1];
+    const payload = JSON.parse(payloadJson as string) as PublicRuntimePayload;
+    expect(payload.sites.map((site) => site.slug)).toEqual(['default', 'archive']);
+    expect(payload.storyEffects.find((binding) => binding.trigger.searchRuleId === strictSearchId)?.requiredEventIds).toContain(
+      `pageVisited:${primarySite.id}:${primarySite.pages[0].id}`
+    );
+    const protectedEntry = payload.messengerThreads[0].nodes[0].protectedEntries?.[0];
+    expect(protectedEntry).toBeTruthy();
+    await expect(decryptText('messenger secret', protectedEntry!)).resolves.toContain('protected messenger body');
+    await expect(decryptText('messenger input answer', payload.messengerThreads[0].nodes[1].matchers[0])).resolves.toContain(thread.nodes[0].id);
+    const combined = (
+      await Promise.all(
+        Object.values(zip.files)
+          .filter((file) => !file.dir)
+          .map((file) => file.async('text').catch(() => ''))
+      )
+    ).join('\n');
+    expect(combined).not.toContain('messenger input answer');
+    expect(combined).not.toContain('strict search answer');
+
+    const siteOnlyBlob = await buildPublicExportZip(project, { siteId: archiveSite.id });
+    const siteOnlyZip = await JSZip.loadAsync(siteOnlyBlob);
+    expect(Object.keys(siteOnlyZip.files)).toContain('index.html');
+    expect(Object.keys(siteOnlyZip.files)).not.toContain('sites/archive/index.html');
+    const siteOnlyHtml = await siteOnlyZip.file('index.html')?.async('text');
+    expect(siteOnlyHtml).toContain('Archive Site');
   });
 });

@@ -1,4 +1,15 @@
-import type { StudioFlowchart, StudioPage, StudioProject, StudioTheme } from '../../types/project';
+import type {
+  LegacyStudioFlowchart,
+  MessengerThread,
+  StoryMapEdge,
+  StoryMapNode,
+  StudioPage,
+  StudioProject,
+  StudioSite,
+  StudioStoryMap,
+  StudioStoryState,
+  StudioTheme
+} from '../../types/project';
 import { normalizePublicPath, safeSlug } from '../path-safety/pathSafety';
 
 export function createId(prefix: string): string {
@@ -51,7 +62,7 @@ export function createPage(partial: Partial<StudioPage> = {}): StudioPage {
   };
 }
 
-export function createDefaultFlowchart(page: StudioPage): StudioFlowchart {
+export function createDefaultFlowchart(page: StudioPage): LegacyStudioFlowchart {
   return {
     id: createId('flow'),
     name: 'Main Flow',
@@ -60,23 +71,137 @@ export function createDefaultFlowchart(page: StudioPage): StudioFlowchart {
   };
 }
 
+function normalizeSitePathPrefix(value: string | undefined): string {
+  return (value ?? '').replace(/^\/+|\/+$/g, '').replace(/\/?index\.html$/i, '');
+}
+
+export function createDefaultSite(partial: Partial<StudioSite> = {}): StudioSite {
+  const theme = partial.themes?.[0] ?? createDefaultTheme();
+  const page = partial.pages?.[0] ?? createPage({ themeId: theme.id });
+  return {
+    id: partial.id ?? createId('site'),
+    name: partial.name ?? 'Default Site',
+    slug: partial.slug ?? 'default',
+    pathPrefix: normalizeSitePathPrefix(partial.pathPrefix),
+    pages: partial.pages ?? [page],
+    themes: partial.themes ?? [theme]
+  };
+}
+
+export function createDefaultStoryState(): StudioStoryState {
+  return {
+    flags: {},
+    visitedPages: [],
+    solvedEvents: [],
+    unlockedPages: [],
+    messenger: {
+      threads: {}
+    }
+  };
+}
+
+export function createDefaultStoryMap(site: StudioSite): StudioStoryMap {
+  const firstPage = site.pages[0];
+  const siteNode: StoryMapNode = {
+    id: createId('node'),
+    label: site.name,
+    type: 'site',
+    linkedEntity: { kind: 'site', siteId: site.id, id: site.id },
+    siteId: site.id,
+    notes: '',
+    tags: [],
+    x: 80,
+    y: 80
+  };
+  const nodes: StoryMapNode[] = [siteNode];
+  const edges: StoryMapEdge[] = [];
+  if (firstPage) {
+    const pageNode: StoryMapNode = {
+      id: createId('node'),
+      label: firstPage.title,
+      type: 'page',
+      linkedEntity: { kind: 'page', siteId: site.id, pageId: firstPage.id, id: firstPage.id },
+      siteId: site.id,
+      pageId: firstPage.id,
+      notes: '',
+      tags: [],
+      x: 320,
+      y: 80
+    };
+    nodes.push(pageNode);
+    edges.push({
+      id: createId('edge'),
+      source: siteNode.id,
+      target: pageNode.id,
+      label: 'Start',
+      action: 'read',
+      pathRole: 'intended',
+      prerequisiteMode: 'permissive',
+      notes: '',
+      tags: [],
+      trigger: {
+        id: createId('trigger'),
+        type: 'pageVisited',
+        siteId: site.id,
+        pageId: firstPage.id
+      },
+      effects: []
+    });
+  }
+  return {
+    id: createId('story-map'),
+    name: 'Main Story Map',
+    nodes,
+    edges
+  };
+}
+
+export function createDefaultMessengerThread(): MessengerThread {
+  const participantId = createId('participant');
+  return {
+    id: createId('thread'),
+    title: 'Messenger Thread',
+    participants: [
+      {
+        id: participantId,
+        name: 'Unknown Contact',
+        role: 'character'
+      }
+    ],
+    nodes: [
+      {
+        id: createId('message'),
+        senderId: participantId,
+        kind: 'text',
+        body: 'Did you find it?',
+        choices: [],
+        matchers: [],
+        effects: []
+      }
+    ]
+  };
+}
+
 export function createProject(name = 'Untitled ARG Project'): StudioProject {
   const createdAt = nowIso();
-  const theme = createDefaultTheme();
-  const page = createPage({ themeId: theme.id });
+  const site = createDefaultSite();
+  const id = createId('project');
   return {
-    schemaVersion: 1,
-    id: createId('project'),
+    schemaVersion: 2,
+    id,
     name,
     createdAt,
     updatedAt: createdAt,
     scriptPreviewEnabled: false,
-    pages: [page],
+    storyNamespace: safeSlug(id, 'story'),
+    primarySiteId: site.id,
+    sites: [site],
     assets: [],
-    themes: [theme],
-    flowcharts: [createDefaultFlowchart(page)],
+    storyMaps: [createDefaultStoryMap(site)],
     searchRules: [],
     conditions: [],
+    messengerThreads: [],
+    storyState: createDefaultStoryState(),
     importedScripts: [],
     snapshots: []
   };

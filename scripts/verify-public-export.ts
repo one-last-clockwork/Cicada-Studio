@@ -3,9 +3,11 @@ import { checkPublicExportZip } from '../src/lib/export-public/checkLeaks';
 import { createId, createPage, createProject } from '../src/lib/projects/createProject';
 
 const project = createProject('CI Public Export Verification');
-project.pages[0].bodyHtml = '<main><h1>Public verification</h1><div data-search-widget="default"></div></main>';
-project.pages[0].memo = 'memo must not leak';
-project.pages[0].revealBlocks.push({
+const site = project.sites[0];
+const page = site.pages[0];
+page.bodyHtml = '<main><h1>Public verification</h1><div data-search-widget="default"></div></main>';
+page.memo = 'memo must not leak';
+page.revealBlocks.push({
   id: createId('reveal'),
   label: 'CI reveal',
   prompt: 'Phrase',
@@ -13,7 +15,7 @@ project.pages[0].revealBlocks.push({
   secretHtml: '<p>ci reveal payload must not leak</p>',
   failureMessage: 'no'
 });
-project.pages[0].unlockPages.push({
+page.unlockPages.push({
   id: createId('unlock'),
   label: 'CI unlock',
   path: '../unsafe.html',
@@ -22,7 +24,7 @@ project.pages[0].unlockPages.push({
   payloadHtml: '<main>ci unlock payload must not leak</main>',
   failureMessage: 'no'
 });
-project.pages.push(
+site.pages.push(
   createPage({
     title: 'CI Draft',
     status: 'draft',
@@ -34,22 +36,22 @@ project.pages.push(
 project.searchRules.push({
   id: createId('search'),
   label: 'CI Search',
-  terms: ['ci search term'],
-  aliases: ['ci alias term'],
-  mode: 'contains',
-  targetPageId: project.pages[0].id,
+    terms: ['ci search term'],
+    aliases: ['ci alias term'],
+    mode: 'contains',
+    targetPageId: page.id,
   hint: '',
   failureMessage: 'no'
 });
 project.conditions.push({
   id: createId('condition'),
   label: 'CI condition',
-  sourcePageId: project.pages[0].id,
-  targetPageId: project.pages[0].id,
+  sourcePageId: page.id,
+  targetPageId: page.id,
   publicHint: 'public hint',
   internalNote: 'ci internal condition must not leak'
 });
-project.flowcharts[0].name = 'ci flowchart must not leak';
+project.storyMaps[0].name = 'ci story map must not leak';
 
 const zip = await buildPublicExportZip(project);
 const result = await checkPublicExportZip(zip, project);

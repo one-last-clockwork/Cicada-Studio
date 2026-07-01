@@ -1,4 +1,5 @@
 import type { StudioProject } from '../../types/project';
+import { migrateProject } from '../projects/migrateProject';
 
 const DB_NAME = 'cicada-studio';
 const DB_VERSION = 1;
@@ -37,12 +38,13 @@ function withStore<T>(mode: IDBTransactionMode, callback: (store: IDBObjectStore
 }
 
 export async function listProjects(): Promise<StudioProject[]> {
-  const projects = await withStore<StudioProject[]>('readonly', (store) => store.getAll());
-  return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const projects = await withStore<unknown[]>('readonly', (store) => store.getAll());
+  return projects.map(migrateProject).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function getProject(id: string): Promise<StudioProject | undefined> {
-  return withStore<StudioProject | undefined>('readonly', (store) => store.get(id));
+  const project = await withStore<unknown | undefined>('readonly', (store) => store.get(id));
+  return project ? migrateProject(project) : undefined;
 }
 
 export async function saveProject(project: StudioProject): Promise<void> {

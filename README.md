@@ -4,7 +4,7 @@ Local-first static ARG authoring studio built as a React + TypeScript + Vite SPA
 
 The app stores authoring data in browser IndexedDB and exports two deliberately separate zip types:
 
-- Project backup zip: includes author-only project data, drafts, notes, answers, flowcharts, and assets.
+- Project backup zip: includes author-only project data, drafts, notes, answers, Story Maps, and assets.
 - Public site zip: contains only static HTML/CSS/assets, the small public runtime, and encrypted reveal/search/unlock payloads.
 
 ## Development
@@ -46,7 +46,7 @@ Use Cloudflare Pages Git integration for the studio itself.
 
 In the app, open the Export tab and choose `Export Public Zip`.
 
-Before download, the app runs the same leakage/path traversal checker used by CI. The public zip must not include internal project JSON, drafts, memos, flowchart data, plaintext answers, plaintext search rules, or plaintext unlock payloads.
+Before download, the app runs the same leakage/path traversal checker used by CI. The public zip must not include internal project JSON, drafts, memos, Story Map data, plaintext answers, plaintext search rules, or plaintext unlock payloads.
 
 Deployment options:
 
